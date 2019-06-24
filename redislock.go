@@ -48,22 +48,17 @@ func New(client RedisClient) *Client {
 	return &Client{client: client}
 }
 
-// Lock creates a new lock using a key with the given TTL.
+// Obtain tries to otain a new lock using a key with the given TTL.
 // May return ErrNotObtained if not successful.
-func (c *Client) Lock(key string, ttl time.Duration, opt *Options) (*Lock, error) {
-	return c.LockContext(context.Background(), key, ttl, opt)
-}
-
-// LockContext behaves like Lock but allows to pass an additional context for
-// additional timeout control and premature cancellation.
-// May return ErrNotObtained if not successful.
-func (c *Client) LockContext(ctx context.Context, key string, ttl time.Duration, opt *Options) (*Lock, error) {
+func (c *Client) Obtain(key string, ttl time.Duration, opt *Options) (*Lock, error) {
 	// Create a random token
 	token, err := c.randomToken()
 	if err != nil {
 		return nil, err
 	}
+
 	value := token + opt.getMetadata()
+	ctx := opt.getContext()
 
 	var backoff *time.Timer
 	for i, attempts := 0, opt.getRetryCount()+1; i < attempts; i++ {
@@ -121,14 +116,9 @@ type Lock struct {
 	value  string
 }
 
-// Obtain is a short-cut for New(...).Lock(...).
+// Obtain is a short-cut for New(...).Obtain(...).
 func Obtain(client RedisClient, key string, ttl time.Duration, opt *Options) (*Lock, error) {
-	return New(client).Lock(key, ttl, opt)
-}
-
-// ObtainWithContext is a short-cut for New(...).LockContext(...).
-func ObtainWithContext(ctx context.Context, client RedisClient, key string, ttl time.Duration, opt *Options) (*Lock, error) {
-	return New(client).LockContext(ctx, key, ttl, opt)
+	return New(client).Obtain(key, ttl, opt)
 }
 
 // Key returns the redis key used by the lock.
@@ -204,6 +194,9 @@ type Options struct {
 
 	// Metadata string is appended to the lock token.
 	Metadata string
+
+	// Optional context for Obtain timeout and cancellation control.
+	Context context.Context
 }
 
 func (o *Options) getRetryCount() int {
@@ -225,4 +218,11 @@ func (o *Options) getMetadata() string {
 		return o.Metadata
 	}
 	return ""
+}
+
+func (o *Options) getContext() context.Context {
+	if o != nil && o.Context != nil {
+		return o.Context
+	}
+	return context.Background()
 }

@@ -27,17 +27,17 @@ var _ = Describe("Client", func() {
 	})
 
 	It("should obtain once with TTL", func() {
-		lock1, err := subject.Lock(lockKey, time.Hour, nil)
+		lock1, err := subject.Obtain(lockKey, time.Hour, nil)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(lock1.Token()).To(HaveLen(22))
 		Expect(lock1.TTL()).To(BeNumerically("~", time.Hour, time.Second))
 		defer lock1.Release()
 
-		_, err = subject.Lock(lockKey, time.Hour, nil)
+		_, err = subject.Obtain(lockKey, time.Hour, nil)
 		Expect(err).To(Equal(redislock.ErrNotObtained))
 		Expect(lock1.Release()).To(Succeed())
 
-		lock2, err := subject.Lock(lockKey, time.Minute, nil)
+		lock2, err := subject.Obtain(lockKey, time.Minute, nil)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(lock2.TTL()).To(BeNumerically("~", time.Minute, time.Second))
 		Expect(lock2.Release()).To(Succeed())
@@ -129,7 +129,7 @@ var _ = Describe("Client", func() {
 				wait := rand.Int63n(int64(50 * time.Millisecond))
 				time.Sleep(time.Duration(wait))
 
-				_, err := subject.Lock(lockKey, time.Minute, nil)
+				_, err := subject.Obtain(lockKey, time.Minute, nil)
 				if err == redislock.ErrNotObtained {
 					return
 				}
