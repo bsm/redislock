@@ -5,7 +5,6 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"errors"
-	"io"
 	"strconv"
 	"sync"
 	"time"
@@ -101,7 +100,7 @@ func (c *Client) randomToken() (string, error) {
 		c.tmp = make([]byte, 16)
 	}
 
-	if _, err := io.ReadFull(rand.Reader, c.tmp); err != nil {
+	if _, err := rand.Read(c.tmp); err != nil {
 		return "", err
 	}
 	return base64.RawURLEncoding.EncodeToString(c.tmp), nil
