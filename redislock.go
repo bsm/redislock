@@ -47,7 +47,7 @@ func New(client RedisClient) *Client {
 	return &Client{client: client}
 }
 
-// Obtain tries to otain a new lock using a key with the given TTL.
+// Obtain tries to obtain a new lock using a key with the given TTL.
 // May return ErrNotObtained if not successful.
 func (c *Client) Obtain(key string, ttl time.Duration, opt *Options) (*Lock, error) {
 	// Create a random token
@@ -56,10 +56,14 @@ func (c *Client) Obtain(key string, ttl time.Duration, opt *Options) (*Lock, err
 		return nil, err
 	}
 
+	// Metadata string is appended to the lock token.
 	value := token + opt.getMetadata()
 	ctx := opt.getContext()
 
-	var backoff *time.Timer
+	// timer can be init first then defer stop
+	backoff := time.NewTimer(opt.getRetryBackoff())
+	defer backoff.Stop()
+
 	for i, attempts := 0, opt.getRetryCount()+1; i < attempts; i++ {
 		ok, err := c.obtain(key, value, ttl)
 		if err != nil {
@@ -68,12 +72,8 @@ func (c *Client) Obtain(key string, ttl time.Duration, opt *Options) (*Lock, err
 			return &Lock{client: c, key: key, value: value}, nil
 		}
 
-		if backoff == nil {
-			backoff = time.NewTimer(opt.getRetryBackoff())
-			defer backoff.Stop()
-		} else {
-			backoff.Reset(opt.getRetryBackoff())
-		}
+		// lock setNx not ok, wait to retry
+		backoff.Reset(opt.getRetryBackoff())
 
 		select {
 		case <-ctx.Done():
@@ -84,8 +84,15 @@ func (c *Client) Obtain(key string, ttl time.Duration, opt *Options) (*Lock, err
 	return nil, ErrNotObtained
 }
 
+// alia method
+func (c *Client) Lock(key string, ttl time.Duration, opt *Options) (*Lock, error) {
+	return c.Obtain(key, ttl, opt)
+}
+
 func (c *Client) obtain(key, value string, ttl time.Duration) (bool, error) {
 	ok, err := c.client.SetNX(key, value, ttl).Result()
+	// See github.com/go-redis/redis func (cmd *BoolCmd) readReply
+	// Will not happen redis.Nil but still keep it
 	if err == redis.Nil {
 		err = nil
 	}
@@ -103,12 +110,14 @@ func (c *Client) randomToken() (string, error) {
 	if _, err := rand.Read(c.tmp); err != nil {
 		return "", err
 	}
+
+	// will gen a 22 len token
 	return base64.RawURLEncoding.EncodeToString(c.tmp), nil
 }
 
 // --------------------------------------------------------------------
 
-// Lock represents an ontained, distributed lock.
+// Lock represents an obtained, distributed lock.
 type Lock struct {
 	client *Client
 	key    string
