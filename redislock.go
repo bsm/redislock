@@ -48,7 +48,7 @@ func New(client RedisClient) *Client {
 	return &Client{client: client}
 }
 
-// Obtain tries to otain a new lock using a key with the given TTL.
+// Obtain tries to obtain a new lock using a key with the given TTL.
 // May return ErrNotObtained if not successful.
 func (c *Client) Obtain(key string, ttl time.Duration, opt *Options) (*Lock, error) {
 	// Create a random token
@@ -109,7 +109,7 @@ func (c *Client) randomToken() (string, error) {
 
 // --------------------------------------------------------------------
 
-// Lock represents an ontained, distributed lock.
+// Lock represents an obtained, distributed lock.
 type Lock struct {
 	client *Client
 	key    string
