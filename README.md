@@ -31,7 +31,7 @@ func main() {
 	locker := redislock.New(client)
 
 	// Try to obtain lock.
-	lock, err := locker.Lock("my-key", 100*time.Millisecond, nil)
+	lock, err := locker.Obtain("my-key", 100*time.Millisecond, nil)
 	if err == redislock.ErrNotObtained {
 		fmt.Println("Could not obtain lock!")
 	} else if err != nil {
