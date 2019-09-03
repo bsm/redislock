@@ -7,10 +7,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/bsm/redislock"
 	"github.com/go-redis/redis"
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
+
+	"github.com/bsm/redislock"
 )
 
 const lockKey = "__bsm_redislock_unit_test__"
@@ -93,7 +94,7 @@ var _ = Describe("Client", func() {
 		Expect(redisClient.PExpire(lockKey, 20*time.Millisecond).Err()).NotTo(HaveOccurred())
 
 		lock, err := redislock.Obtain(redisClient, lockKey, time.Hour, &redislock.Options{
-			RetryCount: 3,
+			RetryStrategy: redislock.NewLimitRetry(3, 100*time.Millisecond),
 		})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(lock.Release()).To(Succeed())
@@ -110,8 +111,7 @@ var _ = Describe("Client", func() {
 		Expect(redisClient.PExpire(lockKey, 50*time.Millisecond).Err()).NotTo(HaveOccurred())
 
 		_, err = redislock.Obtain(redisClient, lockKey, time.Hour, &redislock.Options{
-			RetryCount:   2,
-			RetryBackoff: time.Millisecond,
+			RetryStrategy: redislock.NewLimitRetry(2, time.Millisecond),
 		})
 		Expect(err).To(MatchError(redislock.ErrNotObtained))
 	})

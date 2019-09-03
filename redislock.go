@@ -56,12 +56,15 @@ func (c *Client) Obtain(key string, ttl time.Duration, opt *Options) (*Lock, err
 	if err != nil {
 		return nil, err
 	}
-
+	if opt == nil {
+		opt = &Options{RetryStrategy: NewLimitRetry(10, defaultRetryDuration)}
+	}
 	value := token + opt.getMetadata()
 	ctx := opt.getContext()
 
+	opt.SetTTL(ttl)
 	var backoff *time.Timer
-	for i, attempts := 0, opt.getRetryCount()+1; i < attempts; i++ {
+	for opt.Next() {
 		ok, err := c.obtain(key, value, ttl)
 		if err != nil {
 			return nil, err
@@ -70,10 +73,10 @@ func (c *Client) Obtain(key string, ttl time.Duration, opt *Options) (*Lock, err
 		}
 
 		if backoff == nil {
-			backoff = time.NewTimer(opt.getRetryBackoff())
+			backoff = time.NewTimer(opt.GetRetryBackoff())
 			defer backoff.Stop()
 		} else {
-			backoff.Reset(opt.getRetryBackoff())
+			backoff.Reset(opt.GetRetryBackoff())
 		}
 
 		select {
@@ -184,33 +187,13 @@ func (l *Lock) Release() error {
 
 // Options describe the options for the lock
 type Options struct {
-	// The number of time the acquisition of a lock will be retried.
-	// Default: 0 = do not retry
-	RetryCount int
-
-	// RetryBackoff is the amount of time to wait between retries.
-	// Default: 100ms
-	RetryBackoff time.Duration
+	RetryStrategy
 
 	// Metadata string is appended to the lock token.
 	Metadata string
 
 	// Optional context for Obtain timeout and cancellation control.
 	Context context.Context
-}
-
-func (o *Options) getRetryCount() int {
-	if o != nil && o.RetryCount > 0 {
-		return o.RetryCount
-	}
-	return 0
-}
-
-func (o *Options) getRetryBackoff() time.Duration {
-	if o != nil && o.RetryBackoff > 0 {
-		return o.RetryBackoff
-	}
-	return 100 * time.Millisecond
 }
 
 func (o *Options) getMetadata() string {
