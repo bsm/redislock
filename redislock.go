@@ -57,14 +57,18 @@ func (c *Client) Obtain(key string, ttl time.Duration, opt *Options) (*Lock, err
 		return nil, err
 	}
 	if opt == nil {
-		opt = &Options{RetryStrategy: NewLimitRetry(10, defaultRetryDuration)}
+		opt = &Options{}
 	}
+	opt.init()
+
 	value := token + opt.getMetadata()
 	ctx := opt.getContext()
 
-	opt.SetTTL(ttl)
+	start := time.Now()
+	usedTime := time.Duration(0)
+
 	var backoff *time.Timer
-	for opt.Next() {
+	for usedTime < ttl && opt.Next() {
 		ok, err := c.obtain(key, value, ttl)
 		if err != nil {
 			return nil, err
@@ -84,6 +88,7 @@ func (c *Client) Obtain(key string, ttl time.Duration, opt *Options) (*Lock, err
 			return nil, ctx.Err()
 		case <-backoff.C:
 		}
+		usedTime = time.Now().Sub(start)
 	}
 	return nil, ErrNotObtained
 }
@@ -208,4 +213,11 @@ func (o *Options) getContext() context.Context {
 		return o.Context
 	}
 	return context.Background()
+}
+
+func (o *Options) init() {
+	if o.RetryStrategy != nil {
+		return
+	}
+	o.RetryStrategy = NewLimitRetry(0, defaultRetryDuration)
 }
