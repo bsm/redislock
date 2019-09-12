@@ -1,7 +1,6 @@
 package redislock
 
 import (
-	"context"
 	"crypto/rand"
 	"encoding/base64"
 	"errors"
@@ -64,11 +63,13 @@ func (c *Client) Obtain(key string, ttl time.Duration, opt *Options) (*Lock, err
 	value := token + opt.getMetadata()
 	ctx := opt.getContext()
 
-	start := time.Now()
-	usedTime := time.Duration(0)
+	var timer *time.Timer
+	for deadline := time.Now().Add(ttl); time.Now().Before(deadline); {
+		backoff := opt.NextBackoff()
+		if backoff < 1 {
+			break
+		}
 
-	var backoff *time.Timer
-	for usedTime < ttl && opt.Next() {
 		ok, err := c.obtain(key, value, ttl)
 		if err != nil {
 			return nil, err
@@ -76,20 +77,20 @@ func (c *Client) Obtain(key string, ttl time.Duration, opt *Options) (*Lock, err
 			return &Lock{client: c, key: key, value: value}, nil
 		}
 
-		if backoff == nil {
-			backoff = time.NewTimer(opt.GetRetryBackoff())
-			defer backoff.Stop()
+		if timer == nil {
+			timer = time.NewTimer(backoff)
+			defer timer.Stop()
 		} else {
-			backoff.Reset(opt.GetRetryBackoff())
+			timer.Reset(backoff)
 		}
 
 		select {
 		case <-ctx.Done():
 			return nil, ctx.Err()
-		case <-backoff.C:
+		case <-timer.C:
 		}
-		usedTime = time.Now().Sub(start)
 	}
+
 	return nil, ErrNotObtained
 }
 
@@ -189,35 +190,3 @@ func (l *Lock) Release() error {
 }
 
 // --------------------------------------------------------------------
-
-// Options describe the options for the lock
-type Options struct {
-	RetryStrategy
-
-	// Metadata string is appended to the lock token.
-	Metadata string
-
-	// Optional context for Obtain timeout and cancellation control.
-	Context context.Context
-}
-
-func (o *Options) getMetadata() string {
-	if o != nil {
-		return o.Metadata
-	}
-	return ""
-}
-
-func (o *Options) getContext() context.Context {
-	if o != nil && o.Context != nil {
-		return o.Context
-	}
-	return context.Background()
-}
-
-func (o *Options) init() {
-	if o.RetryStrategy != nil {
-		return
-	}
-	o.RetryStrategy = NewLimitRetry(0, defaultRetryDuration)
-}

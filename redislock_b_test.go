@@ -11,7 +11,7 @@ import (
 	"github.com/bsm/redislock"
 )
 
-//more user and perUserLoop will give redis a large pressure
+// more user and perUserLoop will give redis a large pressure
 const userNumber = 400
 const perUserLoop = 4
 
@@ -21,8 +21,8 @@ func TestRetryStrategy(t *testing.T) {
 		Addr:    "127.0.0.1:6379", DB: 9,
 	})
 
-	t.Run("default", func(t *testing.T) {
-		bench(t, redisClient, "normal")
+	t.Run("linear", func(t *testing.T) {
+		bench(t, redisClient, "linear")
 	})
 
 	t.Run("step", func(t *testing.T) {
@@ -54,8 +54,8 @@ func doWithLock(t *testing.T, wg *sync.WaitGroup, client redislock.RedisClient, 
 	var lock *redislock.Lock
 	var err error
 	switch flag {
-	case "normal":
-		lock, err = redislock.Obtain(client, key, time.Hour, &redislock.Options{RetryStrategy: redislock.NewNormalRetry(time.Millisecond * 100)})
+	case "linear":
+		lock, err = redislock.Obtain(client, key, time.Hour, &redislock.Options{RetryStrategy: redislock.NewLinearRetry(100 * time.Millisecond)})
 	case "step":
 		lock, err = redislock.Obtain(client, key, time.Hour, &redislock.Options{RetryStrategy: redislock.NewStepRetry()})
 	}

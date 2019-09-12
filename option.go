@@ -1,76 +1,107 @@
 package redislock
 
 import (
+	"context"
 	"time"
 )
 
-const defaultRetryDuration = 100 * time.Millisecond
+// Options describe the options for the lock
+type Options struct {
+	// RetryStrategy allows to customise the lock retry strategy.
+	// if RetryStrategy is nil,it acquire the lock only once.
+	RetryStrategy
 
-//RetryStrategy describe the lock retry strategy,100ms is slow for some high performance application
-type RetryStrategy interface {
-	//Next
-	Next() bool
-	//GetRetryBackoff
-	GetRetryBackoff() time.Duration
+	// Metadata string is appended to the lock token.
+	Metadata string
+
+	// Optional context for Obtain timeout and cancellation control.
+	Context context.Context
 }
 
-//NormalRetry every 100ms retry acquire lock
-type NormalRetry struct {
+func (o *Options) getMetadata() string {
+	if o != nil {
+		return o.Metadata
+	}
+	return ""
+}
+
+func (o *Options) getContext() context.Context {
+	if o != nil && o.Context != nil {
+		return o.Context
+	}
+	return context.Background()
+}
+
+func (o *Options) init() {
+	if o.RetryStrategy != nil {
+		return
+	}
+	o.RetryStrategy = NewLimitRetry(0, defaultRetryDuration)
+}
+
+const defaultRetryDuration = 100 * time.Millisecond
+
+// RetryStrategy allows to customise the lock retry strategy.
+type RetryStrategy interface {
+	// NextBackoff returns the next backoff duration.
+	NextBackoff() time.Duration
+}
+
+type linearRetry struct {
 	backoff time.Duration
 }
 
-func (r *NormalRetry) Next() bool {
-	return true
-}
-
-func (r *NormalRetry) GetRetryBackoff() time.Duration {
+func (r *linearRetry) NextBackoff() time.Duration {
 	return r.backoff
 }
 
-func NewNormalRetry(backoff time.Duration) RetryStrategy {
-	return &NormalRetry{backoff: backoff}
+// NewLinearRetry allows retries regularly with customized intervals
+func NewLinearRetry(backoff time.Duration) RetryStrategy {
+	return &linearRetry{backoff: backoff}
 }
 
-type LimitRetry struct {
-	*NormalRetry
+type limitRetry struct {
+	*linearRetry
 
 	count      int
 	limitCount int
 }
 
-func (r *LimitRetry) Next() bool {
+func (r *limitRetry) NextBackoff() time.Duration {
 	if r.count > r.limitCount {
-		return false
+		return 0
 	}
 	r.count++
-	return r.NormalRetry.Next()
+	return r.backoff
 }
 
+// NewLimitRetry limitRetry will limit number of retries
 func NewLimitRetry(limit int, backoff time.Duration) RetryStrategy {
-	return &LimitRetry{NormalRetry: &NormalRetry{backoff: backoff}, limitCount: limit}
+	return &limitRetry{linearRetry: &linearRetry{backoff: backoff}, limitCount: limit}
 }
 
-type StepRetry struct {
+const (
+	minStepRetryDuration = 16 * time.Millisecond
+	maxStepRetryDuration = time.Second
+)
+
+type stepRetry struct {
 	count int
 }
 
-func (r *StepRetry) Next() bool {
+func (r *stepRetry) NextBackoff() time.Duration {
 	r.count++
-	return true
-}
-
-func (r *StepRetry) GetRetryBackoff() time.Duration {
 	if r.count <= 4 {
-		//2ms maybe too fast
-		return 16 * time.Millisecond
+		// 2ms maybe too fast
+		return minStepRetryDuration
 	}
 	if r.count >= 10 {
-		//
-		return defaultRetryDuration
+		return maxStepRetryDuration
 	}
-	return time.Duration(r.count*r.count) * time.Millisecond
+	return time.Duration(2<<r.count) * time.Millisecond
 }
 
+// NewStepRetry will retry at following intervals: 16ms,16ms,16ms,16ms,64ms,128ms,256ms,512ms,1024ms,1s,1s,1s ...
 func NewStepRetry() RetryStrategy {
-	return &StepRetry{}
+	return &stepRetry{}
 }
