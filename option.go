@@ -98,7 +98,7 @@ func (r *stepRetry) NextBackoff() time.Duration {
 	if r.count >= 10 {
 		return maxStepRetryDuration
 	}
-	return time.Duration(2<<r.count) * time.Millisecond
+	return time.Duration(2<<uint(r.count)) * time.Millisecond
 }
 
 // NewStepRetry will retry at following intervals: 16ms,16ms,16ms,16ms,64ms,128ms,256ms,512ms,1024ms,1s,1s,1s ...
