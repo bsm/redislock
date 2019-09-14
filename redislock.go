@@ -1,6 +1,7 @@
 package redislock
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/base64"
 	"errors"
@@ -55,26 +56,24 @@ func (c *Client) Obtain(key string, ttl time.Duration, opt *Options) (*Lock, err
 	if err != nil {
 		return nil, err
 	}
-	if opt == nil {
-		opt = &Options{}
-	}
-	opt.init()
 
 	value := token + opt.getMetadata()
 	ctx := opt.getContext()
+	retry := opt.getRetryStrategy()
 
 	var timer *time.Timer
 	for deadline := time.Now().Add(ttl); time.Now().Before(deadline); {
-		backoff := opt.NextBackoff()
-		if backoff < 1 {
-			break
-		}
 
 		ok, err := c.obtain(key, value, ttl)
 		if err != nil {
 			return nil, err
 		} else if ok {
 			return &Lock{client: c, key: key, value: value}, nil
+		}
+
+		backoff := retry.NextBackoff()
+		if backoff < 1 {
+			break
 		}
 
 		if timer == nil {
@@ -190,3 +189,111 @@ func (l *Lock) Release() error {
 }
 
 // --------------------------------------------------------------------
+
+// Options describe the options for the lock
+type Options struct {
+	// RetryStrategy allows to customise the lock retry strategy.
+	// Default: do not retry
+	RetryStrategy RetryStrategy
+
+	// Metadata string is appended to the lock token.
+	Metadata string
+
+	// Optional context for Obtain timeout and cancellation control.
+	Context context.Context
+}
+
+func (o *Options) getMetadata() string {
+	if o != nil {
+		return o.Metadata
+	}
+	return ""
+}
+
+func (o *Options) getContext() context.Context {
+	if o != nil && o.Context != nil {
+		return o.Context
+	}
+	return context.Background()
+}
+
+func (o *Options) getRetryStrategy() RetryStrategy {
+	if o != nil && o.RetryStrategy != nil {
+		return o.RetryStrategy
+	}
+	return noRetry{}
+}
+
+// --------------------------------------------------------------------
+
+// RetryStrategy allows to customise the lock retry strategy.
+type RetryStrategy interface {
+	// NextBackoff returns the next backoff duration.
+	NextBackoff() time.Duration
+}
+
+type linearBackoff struct {
+	backoff time.Duration
+}
+
+func (r *linearBackoff) NextBackoff() time.Duration {
+	return r.backoff
+}
+
+// LinearBackoff allows retries regularly with customized intervals
+func LinearBackoff(backoff time.Duration) RetryStrategy {
+	return &linearBackoff{backoff: backoff}
+}
+
+type noRetry struct{}
+
+func (noRetry) NextBackoff() time.Duration { return 0 }
+
+// NoRetry acquire the lock only once.
+func NoRetry() RetryStrategy {
+	return noRetry{}
+}
+
+type limitLinearBackoff struct {
+	linearBackoff
+
+	count      int
+	limitCount int
+}
+
+func (r *limitLinearBackoff) NextBackoff() time.Duration {
+	r.count++
+	if r.count > r.limitCount {
+		return 0
+	}
+	return r.backoff
+}
+
+// LimitedLinearBackoff will limit number of retries
+func LimitedLinearBackoff(backoff time.Duration, limit int) RetryStrategy {
+	return &limitLinearBackoff{linearBackoff: linearBackoff{backoff: backoff}, limitCount: limit}
+}
+
+type exponentialBackoff struct {
+	count int
+
+	minBackoff time.Duration
+	maxBackoff time.Duration
+}
+
+func (r *exponentialBackoff) NextBackoff() time.Duration {
+	r.count++
+	if d := time.Duration(2<<uint(r.count)) * time.Millisecond; d < r.minBackoff {
+		return r.minBackoff
+	} else if d > r.maxBackoff {
+		return r.maxBackoff
+	} else {
+		return d
+	}
+}
+
+// ExponentialBackoff strategy is an optimization strategy with a retry time of 2**n milliseconds (n means number of times).
+// You can set a minimum and maximum value, the recommended minimum value is not less than 16ms.
+func ExponentialBackoff(min, max time.Duration) RetryStrategy {
+	return &exponentialBackoff{minBackoff: min, maxBackoff: max}
+}
