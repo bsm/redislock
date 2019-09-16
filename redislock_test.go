@@ -94,7 +94,7 @@ var _ = Describe("Client", func() {
 		Expect(redisClient.PExpire(lockKey, 20*time.Millisecond).Err()).NotTo(HaveOccurred())
 
 		lock, err := redislock.Obtain(redisClient, lockKey, time.Hour, &redislock.Options{
-			RetryStrategy: redislock.LimitedLinearBackoff(100*time.Millisecond, 3),
+			RetryStrategy: redislock.LimitRetry(redislock.LinearBackoff(100*time.Millisecond), 3),
 		})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(lock.Release()).To(Succeed())
@@ -111,7 +111,7 @@ var _ = Describe("Client", func() {
 		Expect(redisClient.PExpire(lockKey, 50*time.Millisecond).Err()).NotTo(HaveOccurred())
 
 		_, err = redislock.Obtain(redisClient, lockKey, time.Hour, &redislock.Options{
-			RetryStrategy: redislock.LimitedLinearBackoff(time.Millisecond, 2),
+			RetryStrategy: redislock.LimitRetry(redislock.LinearBackoff(time.Millisecond), 2),
 		})
 		Expect(err).To(MatchError(redislock.ErrNotObtained))
 	})
@@ -155,25 +155,25 @@ var _ = Describe("RetryStrategy", func() {
 		Expect(subject.NextBackoff()).To(Equal(time.Second))
 	})
 
-	It("should support linear backoff with limits", func() {
-		subject := redislock.LimitedLinearBackoff(time.Second, 2)
+	It("should support limits", func() {
+		subject := redislock.LimitRetry(redislock.LinearBackoff(time.Second), 2)
 		Expect(subject.NextBackoff()).To(Equal(time.Second))
 		Expect(subject.NextBackoff()).To(Equal(time.Second))
 		Expect(subject.NextBackoff()).To(Equal(time.Duration(0)))
 	})
 
 	It("should support exponential backoff", func() {
-		subject := redislock.ExponentialBackoff(time.Millisecond*16, time.Millisecond*256)
-		Expect(subject.NextBackoff()).To(Equal(time.Millisecond * 16))
-		Expect(subject.NextBackoff()).To(Equal(time.Millisecond * 16))
-		Expect(subject.NextBackoff()).To(Equal(time.Millisecond * 16))
-		Expect(subject.NextBackoff()).To(Equal(time.Millisecond * 32))
-		Expect(subject.NextBackoff()).To(Equal(time.Millisecond * 64))
-		Expect(subject.NextBackoff()).To(Equal(time.Millisecond * 128))
-		Expect(subject.NextBackoff()).To(Equal(time.Millisecond * 256))
-		Expect(subject.NextBackoff()).To(Equal(time.Millisecond * 256))
-		Expect(subject.NextBackoff()).To(Equal(time.Millisecond * 256))
-		Expect(subject.NextBackoff()).To(Equal(time.Millisecond * 256))
+		subject := redislock.ExponentialBackoff(10*time.Millisecond, 300*time.Millisecond)
+		Expect(subject.NextBackoff()).To(Equal(10 * time.Millisecond))
+		Expect(subject.NextBackoff()).To(Equal(10 * time.Millisecond))
+		Expect(subject.NextBackoff()).To(Equal(16 * time.Millisecond))
+		Expect(subject.NextBackoff()).To(Equal(32 * time.Millisecond))
+		Expect(subject.NextBackoff()).To(Equal(64 * time.Millisecond))
+		Expect(subject.NextBackoff()).To(Equal(128 * time.Millisecond))
+		Expect(subject.NextBackoff()).To(Equal(256 * time.Millisecond))
+		Expect(subject.NextBackoff()).To(Equal(300 * time.Millisecond))
+		Expect(subject.NextBackoff()).To(Equal(300 * time.Millisecond))
+		Expect(subject.NextBackoff()).To(Equal(300 * time.Millisecond))
 	})
 })
 
