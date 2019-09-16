@@ -221,7 +221,7 @@ func (o *Options) getRetryStrategy() RetryStrategy {
 	if o != nil && o.RetryStrategy != nil {
 		return o.RetryStrategy
 	}
-	return noRetry{}
+	return NoRetry()
 }
 
 // --------------------------------------------------------------------
@@ -232,68 +232,60 @@ type RetryStrategy interface {
 	NextBackoff() time.Duration
 }
 
-type linearBackoff struct {
-	backoff time.Duration
-}
-
-func (r *linearBackoff) NextBackoff() time.Duration {
-	return r.backoff
-}
+type linearBackoff time.Duration
 
 // LinearBackoff allows retries regularly with customized intervals
 func LinearBackoff(backoff time.Duration) RetryStrategy {
-	return &linearBackoff{backoff: backoff}
+	return linearBackoff(backoff)
 }
-
-type noRetry struct{}
-
-func (noRetry) NextBackoff() time.Duration { return 0 }
 
 // NoRetry acquire the lock only once.
 func NoRetry() RetryStrategy {
-	return noRetry{}
+	return linearBackoff(0)
 }
 
-type limitLinearBackoff struct {
-	linearBackoff
-
-	count      int
-	limitCount int
+func (r linearBackoff) NextBackoff() time.Duration {
+	return time.Duration(r)
 }
 
-func (r *limitLinearBackoff) NextBackoff() time.Duration {
-	r.count++
-	if r.count > r.limitCount {
+type limitedRetry struct {
+	s RetryStrategy
+
+	cnt, max int
+}
+
+// LimitRetry limits the number of retries to max attempts.
+func LimitRetry(s RetryStrategy, max int) RetryStrategy {
+	return &limitedRetry{s: s, max: max}
+}
+
+func (r *limitedRetry) NextBackoff() time.Duration {
+	if r.cnt >= r.max {
 		return 0
 	}
-	return r.backoff
-}
-
-// LimitedLinearBackoff will limit number of retries
-func LimitedLinearBackoff(backoff time.Duration, limit int) RetryStrategy {
-	return &limitLinearBackoff{linearBackoff: linearBackoff{backoff: backoff}, limitCount: limit}
+	r.cnt++
+	return r.s.NextBackoff()
 }
 
 type exponentialBackoff struct {
-	count int
+	cnt uint
 
-	minBackoff time.Duration
-	maxBackoff time.Duration
-}
-
-func (r *exponentialBackoff) NextBackoff() time.Duration {
-	r.count++
-	if d := time.Duration(2<<uint(r.count)) * time.Millisecond; d < r.minBackoff {
-		return r.minBackoff
-	} else if d > r.maxBackoff {
-		return r.maxBackoff
-	} else {
-		return d
-	}
+	min, max time.Duration
 }
 
 // ExponentialBackoff strategy is an optimization strategy with a retry time of 2**n milliseconds (n means number of times).
 // You can set a minimum and maximum value, the recommended minimum value is not less than 16ms.
 func ExponentialBackoff(min, max time.Duration) RetryStrategy {
-	return &exponentialBackoff{minBackoff: min, maxBackoff: max}
+	return &exponentialBackoff{min: min, max: max}
+}
+
+func (r *exponentialBackoff) NextBackoff() time.Duration {
+	r.cnt++
+	if d := time.Duration(2<<r.cnt) * time.Millisecond; d < r.min {
+		return r.min
+	} else if r.max != 0 && d > r.max {
+		return r.max
+	} else {
+		return d
+	}
 }
