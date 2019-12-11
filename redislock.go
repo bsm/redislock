@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/go-redis/redis"
+	"github.com/go-redis/redis/v7"
 )
 
 var (
@@ -94,11 +94,7 @@ func (c *Client) Obtain(key string, ttl time.Duration, opt *Options) (*Lock, err
 }
 
 func (c *Client) obtain(key, value string, ttl time.Duration) (bool, error) {
-	ok, err := c.client.SetNX(key, value, ttl).Result()
-	if err == redis.Nil {
-		err = nil
-	}
-	return ok, err
+	return c.client.SetNX(key, value, ttl).Result()
 }
 
 func (c *Client) randomToken() (string, error) {
