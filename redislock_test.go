@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/bsm/redislock"
-	"github.com/go-redis/redis/v7"
+	"github.com/go-redis/redis"
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 )
