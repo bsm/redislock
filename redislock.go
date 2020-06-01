@@ -184,6 +184,18 @@ func (l *Lock) Release() error {
 	return nil
 }
 
+// If you want to release lock in other project, you may use this func
+func (l *Lock) GetKeyAndValue() (string, string) {
+	return l.key, l.value
+}
+
+// short-cut for Lock.Release()
+// If you want to release lock in other project, you may use this func
+func Release(client RedisClient, key, value string) error {
+	l := &Lock{client: New(client), key: key, value: value}
+	return l.Release()
+}
+
 // --------------------------------------------------------------------
 
 // Options describe the options for the lock

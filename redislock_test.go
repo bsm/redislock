@@ -140,6 +140,14 @@ var _ = Describe("Client", func() {
 		Expect(numLocks).To(Equal(int32(1)))
 	})
 
+	It("should release use short-cut Release", func() {
+		lock, err := redislock.Obtain(redisClient, lockKey, 30*time.Second, nil)
+		Expect(err).NotTo(HaveOccurred())
+		key, value := lock.GetKeyAndValue()
+		Expect(redislock.Release(redisClient, key, value)).NotTo(HaveOccurred())
+		Expect(redislock.Release(redisClient, key, value)).To(MatchError(redislock.ErrLockNotHeld))
+	})
+
 })
 
 var _ = Describe("RetryStrategy", func() {
