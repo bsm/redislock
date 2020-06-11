@@ -34,6 +34,7 @@ type RedisClient interface {
 	EvalSha(sha1 string, keys []string, args ...interface{}) *redis.Cmd
 	ScriptExists(scripts ...string) *redis.BoolSliceCmd
 	ScriptLoad(script string) *redis.StringCmd
+	MGet(keys ...string) *redis.SliceCmd
 }
 
 // Client wraps a redis client.
@@ -109,6 +110,27 @@ func (c *Client) randomToken() (string, error) {
 		return "", err
 	}
 	return base64.RawURLEncoding.EncodeToString(c.tmp), nil
+}
+
+func (c *Client) ExistLocks(keys ...string) ([]bool, error) {
+	values, err := c.client.MGet(keys...).Result()
+	if err != nil {
+		return nil, err
+	}
+	if len(keys) != len(values) {
+		return nil, errors.New("unexpected values length when get multi locks")
+	}
+
+	results := make([]bool, len(keys))
+	for i := 0; i < len(values); i++ {
+		if values[i] == nil {
+			results[i] = false
+		} else {
+			results[i] = true
+		}
+	}
+
+	return results, nil
 }
 
 // --------------------------------------------------------------------

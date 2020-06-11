@@ -33,6 +33,10 @@ var _ = Describe("Client", func() {
 		Expect(lock1.TTL()).To(BeNumerically("~", time.Hour, time.Second))
 		defer lock1.Release()
 
+		existeds, err := subject.ExistLocks(lockKey)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(existeds).Should(Equal([]bool{true}))
+
 		_, err = subject.Obtain(lockKey, time.Hour, nil)
 		Expect(err).To(Equal(redislock.ErrNotObtained))
 		Expect(lock1.Release()).To(Succeed())
@@ -47,6 +51,10 @@ var _ = Describe("Client", func() {
 		lock, err := redislock.Obtain(redisClient, lockKey, time.Hour, nil)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(lock.Release()).To(Succeed())
+
+		existeds, err := subject.ExistLocks(lockKey)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(existeds).Should(Equal([]bool{false}))
 	})
 
 	It("should support custom metadata", func() {
