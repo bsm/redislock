@@ -118,12 +118,11 @@ func (c *ClientMin) Obtain(key string, ttl time.Duration, opt *Options) (*LockMi
 func (c *ClientMin) obtainmin(key, value string, ttl time.Duration) (bool, error) {
 	con := c.pool.Get()
 	defer con.Close()
-	val, err := redis.String(con.Do("SET", "dineshscriptlock", "locked", "EX", 1000, "NX"))
+	_, err := redis.String(con.Do("SET", key, value, "PX", ttl.Milliseconds(), "NX"))
 	//Redigo returns nil so that means lock is not obtained so mask and return error
-	if err != nil {
-		return false, err
-	}
-	if val != "OK" {
+	if err == redis.ErrNil {
+		return false, nil
+	} else if err != nil {
 		return false, err
 	}
 	return true, nil
