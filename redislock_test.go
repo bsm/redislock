@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/bsm/redislock"
-	"github.com/go-redis/redis/v7"
+	"github.com/garyburd/redigo/redis"
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 )
@@ -16,10 +16,10 @@ import (
 const lockKey = "__bsm_redislock_unit_test__"
 
 var _ = Describe("Client", func() {
-	var subject *redislock.Client
+	var subject *redislock.ClientMin
 
 	BeforeEach(func() {
-		subject = redislock.New(redisClient)
+		subject = redislock.NewMin(redisClient)
 	})
 
 	AfterEach(func() {
@@ -183,13 +183,18 @@ func TestSuite(t *testing.T) {
 	RunSpecs(t, "redislock")
 }
 
-var redisClient *redis.Client
+var redisClient *redis.Pool
 
 var _ = BeforeSuite(func() {
-	redisClient = redis.NewClient(&redis.Options{
-		Network: "tcp",
-		Addr:    "127.0.0.1:6379", DB: 9,
-	})
+	redisClient = &redis.Pool{
+		MaxIdle:     3,
+		IdleTimeout: 240 * time.Second,
+		Dial: func() (redis.Conn, error) {
+			// TODO: connect to database bsaed on the client id
+			return redis.Dial("tcp", ":6379",
+				redis.DialDatabase(1))
+		},
+	}
 	Expect(redisClient.Ping().Err()).To(Succeed())
 })
 
