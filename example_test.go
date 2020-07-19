@@ -6,19 +6,23 @@ import (
 	"time"
 
 	"github.com/bsm/redislock"
-	"github.com/go-redis/redis/v7"
+	"github.com/garyburd/redigo/redis"
 )
 
 func Example() {
 	// Connect to redis.
-	client := redis.NewClient(&redis.Options{
-		Network: "tcp",
-		Addr:    "127.0.0.1:6379",
-	})
-	defer client.Close()
+	client := &redis.Pool{
+		MaxIdle:     3,
+		IdleTimeout: 240 * time.Second,
+		Dial: func() (redis.Conn, error) {
+			// TODO: connect to database bsaed on the client id
+			return redis.Dial("tcp", ":6379",
+				redis.DialDatabase(1))
+		},
+	}
 
 	// Create a new lock client.
-	locker := redislock.New(client)
+	locker := redislock.NewMin(client)
 
 	// Try to obtain lock.
 	lock, err := locker.Obtain("my-key", 100*time.Millisecond, nil)

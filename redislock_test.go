@@ -102,7 +102,7 @@ var _ = Describe("Client", func() {
 
 		//	Expect(redisClient.Set(lockKey, "ABCD", 0).Err()).NotTo(HaveOccurred())
 		Expect(err).NotTo(HaveOccurred())
-		_, err = conn.Do("PEXPIRE", lockKey, 20*time.Millisecond)
+		_, err = conn.Do("PEXPIRE", lockKey, 20)
 		//	Expect(redisClient.PExpire(lockKey, 20*time.Millisecond).Err()).NotTo(HaveOccurred())
 		Expect(err).NotTo(HaveOccurred())
 		lock, err := redislock.Obtain(redisClient, lockKey, time.Hour, &redislock.Options{
