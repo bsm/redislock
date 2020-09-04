@@ -61,9 +61,14 @@ func (c *Client) Obtain(key string, ttl time.Duration, opt *Options) (*Lock, err
 	ctx := opt.getContext()
 	retry := opt.getRetryStrategy()
 
-	var timer *time.Timer
-	for deadline := time.Now().Add(ttl); time.Now().Before(deadline); {
+	var cancel context.CancelFunc = func() {}
+	if _, ok := ctx.Deadline(); !ok {
+		ctx, cancel = context.WithDeadline(ctx, time.Now().Add(ttl))
+	}
+	defer cancel()
 
+	var timer *time.Timer
+	for {
 		ok, err := c.obtain(key, value, ttl)
 		if err != nil {
 			return nil, err
@@ -73,7 +78,7 @@ func (c *Client) Obtain(key string, ttl time.Duration, opt *Options) (*Lock, err
 
 		backoff := retry.NextBackoff()
 		if backoff < 1 {
-			break
+			return nil, ErrNotObtained
 		}
 
 		if timer == nil {
@@ -85,12 +90,10 @@ func (c *Client) Obtain(key string, ttl time.Duration, opt *Options) (*Lock, err
 
 		select {
 		case <-ctx.Done():
-			return nil, ctx.Err()
+			return nil, ErrNotObtained
 		case <-timer.C:
 		}
 	}
-
-	return nil, ErrNotObtained
 }
 
 func (c *Client) obtain(key, value string, ttl time.Duration) (bool, error) {
@@ -195,7 +198,9 @@ type Options struct {
 	// Metadata string is appended to the lock token.
 	Metadata string
 
-	// Optional context for Obtain timeout and cancellation control.
+	// Context provides an optional context for timeout and cancellation control.
+	// If requested, Obtain will by default retry until the TTL exires. This
+	// behaviour can be tweaked with a custom context deadline.
 	Context context.Context
 }
 
