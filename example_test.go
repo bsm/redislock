@@ -1,6 +1,7 @@
 package redislock_test
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"time"
@@ -57,4 +58,53 @@ func Example() {
 	// I have a lock!
 	// Yay, I still have my lock!
 	// Now, my lock has expired!
+}
+
+func ExampleClient_Obtain_retry() {
+	client := redis.NewClient(&redis.Options{Network: "tcp", Addr: "127.0.0.1:6379"})
+	defer client.Close()
+
+	locker := redislock.New(client)
+
+	// Retry every 100ms, for up-to 3x
+	backoff := redislock.LimitRetry(redislock.LinearBackoff(100*time.Millisecond), 3)
+
+	// Obtain lock with retry
+	lock, err := locker.Obtain("my-key", time.Second, &redislock.Options{
+		RetryStrategy: backoff,
+	})
+	if err == redislock.ErrNotObtained {
+		fmt.Println("Could not obtain lock!")
+	} else if err != nil {
+		log.Fatalln(err)
+	}
+	defer lock.Release()
+
+	fmt.Println("I have a lock!")
+}
+
+func ExampleClient_Obtain_customDeadline() {
+	client := redis.NewClient(&redis.Options{Network: "tcp", Addr: "127.0.0.1:6379"})
+	defer client.Close()
+
+	locker := redislock.New(client)
+
+	// Retry every 500ms, for up-to a minute
+	backoff := redislock.LinearBackoff(500 * time.Millisecond)
+	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(time.Minute))
+	defer cancel()
+
+	// Obtain lock with retry + custom deadline
+	lock, err := locker.Obtain("my-key", time.Second, &redislock.Options{
+		RetryStrategy: backoff,
+		Context:       ctx,
+	})
+	if err == redislock.ErrNotObtained {
+		fmt.Println("Could not obtain lock!")
+	} else if err != nil {
+		log.Fatalln(err)
+	}
+	defer lock.Release()
+
+	fmt.Println("I have a lock!")
 }
