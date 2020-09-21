@@ -199,7 +199,7 @@ type Options struct {
 	Metadata string
 
 	// Context provides an optional context for timeout and cancellation control.
-	// If requested, Obtain will by default retry until the TTL exires. This
+	// If requested, Obtain will by default retry until the TTL expires. This
 	// behaviour can be tweaked with a custom context deadline.
 	Context context.Context
 }
