@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.7.0
+
+- Replace Options.Context with explicit ctx parameter [#25](https://github.com/bsm/redislock/pull/25)
+
 ## v0.6.0
 
 - Allow to customise retry deadlines through context [#22](https://github.com/bsm/redislock/pull/22)
