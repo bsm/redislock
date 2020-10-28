@@ -50,7 +50,7 @@ func New(client RedisClient) *Client {
 
 // Obtain tries to obtain a new lock using a key with the given TTL.
 // May return ErrNotObtained if not successful.
-func (c *Client) Obtain(key string, ttl time.Duration, opt *Options) (*Lock, error) {
+func (c *Client) Obtain(ctx context.Context, key string, ttl time.Duration, opt *Options) (*Lock, error) {
 	// Create a random token
 	token, err := c.randomToken()
 	if err != nil {
@@ -58,18 +58,14 @@ func (c *Client) Obtain(key string, ttl time.Duration, opt *Options) (*Lock, err
 	}
 
 	value := token + opt.getMetadata()
-	ctx := opt.getContext()
 	retry := opt.getRetryStrategy()
 
-	var cancel context.CancelFunc = func() {}
-	if _, ok := ctx.Deadline(); !ok {
-		ctx, cancel = context.WithDeadline(ctx, time.Now().Add(ttl))
-	}
+	deadlinectx, cancel := context.WithDeadline(ctx, time.Now().Add(ttl))
 	defer cancel()
 
 	var timer *time.Timer
 	for {
-		ok, err := c.obtain(ctx, key, value, ttl)
+		ok, err := c.obtain(deadlinectx, key, value, ttl)
 		if err != nil {
 			return nil, err
 		} else if ok {
@@ -89,7 +85,7 @@ func (c *Client) Obtain(key string, ttl time.Duration, opt *Options) (*Lock, err
 		}
 
 		select {
-		case <-ctx.Done():
+		case <-deadlinectx.Done():
 			return nil, ErrNotObtained
 		case <-timer.C:
 		}
@@ -124,8 +120,8 @@ type Lock struct {
 }
 
 // Obtain is a short-cut for New(...).Obtain(...).
-func Obtain(client RedisClient, key string, ttl time.Duration, opt *Options) (*Lock, error) {
-	return New(client).Obtain(key, ttl, opt)
+func Obtain(ctx context.Context, client RedisClient, key string, ttl time.Duration, opt *Options) (*Lock, error) {
+	return New(client).Obtain(ctx, key, ttl, opt)
 }
 
 // Key returns the redis key used by the lock.
@@ -144,8 +140,8 @@ func (l *Lock) Metadata() string {
 }
 
 // TTL returns the remaining time-to-live. Returns 0 if the lock has expired.
-func (l *Lock) TTL() (time.Duration, error) {
-	res, err := luaPTTL.Run(context.TODO(), l.client.client, []string{l.key}, l.value).Result()
+func (l *Lock) TTL(ctx context.Context) (time.Duration, error) {
+	res, err := luaPTTL.Run(ctx, l.client.client, []string{l.key}, l.value).Result()
 	if err == redis.Nil {
 		return 0, nil
 	} else if err != nil {
@@ -160,9 +156,9 @@ func (l *Lock) TTL() (time.Duration, error) {
 
 // Refresh extends the lock with a new TTL.
 // May return ErrNotObtained if refresh is unsuccessful.
-func (l *Lock) Refresh(ttl time.Duration, opt *Options) error {
+func (l *Lock) Refresh(ctx context.Context, ttl time.Duration, opt *Options) error {
 	ttlVal := strconv.FormatInt(int64(ttl/time.Millisecond), 10)
-	status, err := luaRefresh.Run(context.TODO(), l.client.client, []string{l.key}, l.value, ttlVal).Result()
+	status, err := luaRefresh.Run(ctx, l.client.client, []string{l.key}, l.value, ttlVal).Result()
 	if err != nil {
 		return err
 	} else if status == int64(1) {
@@ -173,8 +169,8 @@ func (l *Lock) Refresh(ttl time.Duration, opt *Options) error {
 
 // Release manually releases the lock.
 // May return ErrLockNotHeld.
-func (l *Lock) Release() error {
-	res, err := luaRelease.Run(context.TODO(), l.client.client, []string{l.key}, l.value).Result()
+func (l *Lock) Release(ctx context.Context) error {
+	res, err := luaRelease.Run(ctx, l.client.client, []string{l.key}, l.value).Result()
 	if err == redis.Nil {
 		return ErrLockNotHeld
 	} else if err != nil {
@@ -197,11 +193,6 @@ type Options struct {
 
 	// Metadata string is appended to the lock token.
 	Metadata string
-
-	// Context provides an optional context for timeout and cancellation control.
-	// If requested, Obtain will by default retry until the TTL expires. This
-	// behaviour can be tweaked with a custom context deadline.
-	Context context.Context
 }
 
 func (o *Options) getMetadata() string {
@@ -209,13 +200,6 @@ func (o *Options) getMetadata() string {
 		return o.Metadata
 	}
 	return ""
-}
-
-func (o *Options) getContext() context.Context {
-	if o != nil && o.Context != nil {
-		return o.Context
-	}
-	return context.Background()
 }
 
 func (o *Options) getRetryStrategy() RetryStrategy {
