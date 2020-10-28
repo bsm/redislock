@@ -1,14 +1,11 @@
-default: vet test
-
-vet:
-	go vet ./...
+default: test
 
 test:
 	go test ./...
 
 doc: README.md
 
-.PHONY: default test vet
+.PHONY: default test
 
 README.md: README.md.tpl $(wildcard *.go)
 	becca -package $(subst $(GOPATH)/src/,,$(PWD))
