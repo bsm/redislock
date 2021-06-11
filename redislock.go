@@ -8,6 +8,7 @@ import (
 	"io"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/go-redis/redis/v8"
@@ -236,24 +237,24 @@ func (r linearBackoff) NextBackoff() time.Duration {
 type limitedRetry struct {
 	s RetryStrategy
 
-	cnt, max int
+	cnt, max int32
 }
 
 // LimitRetry limits the number of retries to max attempts.
-func LimitRetry(s RetryStrategy, max int) RetryStrategy {
+func LimitRetry(s RetryStrategy, max int32) RetryStrategy {
 	return &limitedRetry{s: s, max: max}
 }
 
 func (r *limitedRetry) NextBackoff() time.Duration {
-	if r.cnt >= r.max {
+	if atomic.LoadInt32(&r.cnt) >= r.max {
 		return 0
 	}
-	r.cnt++
+	atomic.AddInt32(&r.cnt, 1)
 	return r.s.NextBackoff()
 }
 
 type exponentialBackoff struct {
-	cnt uint
+	cnt uint32
 
 	min, max time.Duration
 }
@@ -265,11 +266,12 @@ func ExponentialBackoff(min, max time.Duration) RetryStrategy {
 }
 
 func (r *exponentialBackoff) NextBackoff() time.Duration {
-	r.cnt++
+	atomic.AddUint32(&r.cnt, 1)
 
 	ms := 2 << 25
-	if r.cnt < 25 {
-		ms = 2 << r.cnt
+	cnt := atomic.LoadUint32(&r.cnt)
+	if cnt < 25 {
+		ms = 2 << cnt
 	}
 
 	if d := time.Duration(ms) * time.Millisecond; d < r.min {
