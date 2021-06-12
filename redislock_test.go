@@ -2,7 +2,6 @@ package redislock_test
 
 import (
 	"context"
-	"math/rand"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -120,6 +119,9 @@ var _ = Describe("Client", func() {
 	It("should prevent multiple locks (fuzzing)", func() {
 		numLocks := int32(0)
 		wg := new(sync.WaitGroup)
+		opts := &redislock.Options{
+			RetryStrategy: redislock.LimitRetry(redislock.ExponentialBackoff(30*time.Millisecond, 5*time.Second), 10),
+		}
 		for i := 0; i < 1000; i++ {
 			wg.Add(1)
 
@@ -127,10 +129,7 @@ var _ = Describe("Client", func() {
 				defer GinkgoRecover()
 				defer wg.Done()
 
-				wait := rand.Int63n(int64(50 * time.Millisecond))
-				time.Sleep(time.Duration(wait))
-
-				_, err := subject.Obtain(ctx, lockKey, time.Minute, nil)
+				_, err := subject.Obtain(ctx, lockKey, time.Minute, opts)
 				if err == redislock.ErrNotObtained {
 					return
 				}

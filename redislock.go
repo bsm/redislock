@@ -204,7 +204,7 @@ func (o *Options) getMetadata() string {
 
 func (o *Options) getRetryStrategy() RetryStrategy {
 	if o != nil && o.RetryStrategy != nil {
-		return o.RetryStrategy
+		return o.RetryStrategy.Clone()
 	}
 	return NoRetry()
 }
@@ -215,6 +215,8 @@ func (o *Options) getRetryStrategy() RetryStrategy {
 type RetryStrategy interface {
 	// NextBackoff returns the next backoff duration.
 	NextBackoff() time.Duration
+
+	Clone() RetryStrategy
 }
 
 type linearBackoff time.Duration
@@ -231,6 +233,10 @@ func NoRetry() RetryStrategy {
 
 func (r linearBackoff) NextBackoff() time.Duration {
 	return time.Duration(r)
+}
+
+func (r linearBackoff) Clone() RetryStrategy {
+	return r
 }
 
 type limitedRetry struct {
@@ -250,6 +256,10 @@ func (r *limitedRetry) NextBackoff() time.Duration {
 	}
 	r.cnt++
 	return r.s.NextBackoff()
+}
+
+func (r *limitedRetry) Clone() RetryStrategy {
+	return &limitedRetry{s: r.s.Clone(), max: r.max}
 }
 
 type exponentialBackoff struct {
@@ -279,4 +289,8 @@ func (r *exponentialBackoff) NextBackoff() time.Duration {
 	} else {
 		return d
 	}
+}
+
+func (r *exponentialBackoff) Clone() RetryStrategy {
+	return &exponentialBackoff{min: r.min, max: r.max}
 }
