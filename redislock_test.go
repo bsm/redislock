@@ -2,7 +2,6 @@ package redislock_test
 
 import (
 	"context"
-	"math/rand"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -127,9 +126,6 @@ var _ = Describe("Client", func() {
 				defer GinkgoRecover()
 				defer wg.Done()
 
-				wait := rand.Int63n(int64(50 * time.Millisecond))
-				time.Sleep(time.Duration(wait))
-
 				_, err := subject.Obtain(ctx, lockKey, time.Minute, nil)
 				if err == redislock.ErrNotObtained {
 					return
@@ -155,9 +151,6 @@ var _ = Describe("Client", func() {
 				defer GinkgoRecover()
 				defer wg.Done()
 
-				wait := rand.Int63n(int64(50 * time.Millisecond))
-				time.Sleep(time.Duration(wait))
-
 				_, err := subject.Obtain(ctx, lockKey, time.Minute, cacheOpts)
 				if err == redislock.ErrNotObtained {
 					return
@@ -182,9 +175,6 @@ var _ = Describe("Client", func() {
 			go func() {
 				defer GinkgoRecover()
 				defer wg.Done()
-
-				wait := rand.Int63n(int64(50 * time.Millisecond))
-				time.Sleep(time.Duration(wait))
 
 				_, err := subject.Obtain(ctx, lockKey, time.Minute, cacheOpts)
 				if err == redislock.ErrNotObtained {
