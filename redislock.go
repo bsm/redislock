@@ -266,10 +266,9 @@ func ExponentialBackoff(min, max time.Duration) RetryStrategy {
 }
 
 func (r *exponentialBackoff) NextBackoff() time.Duration {
-	atomic.AddUint32(&r.cnt, 1)
+	cnt := atomic.AddUint32(&r.cnt, 1)
 
 	ms := 2 << 25
-	cnt := atomic.LoadUint32(&r.cnt)
 	if cnt < 25 {
 		ms = 2 << cnt
 	}
