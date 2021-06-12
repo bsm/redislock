@@ -235,18 +235,18 @@ func (r linearBackoff) NextBackoff() time.Duration {
 }
 
 type limitedRetry struct {
-	s RetryStrategy
-
-	cnt, max int32
+	s   RetryStrategy
+	cnt int32
+	max int
 }
 
 // LimitRetry limits the number of retries to max attempts.
-func LimitRetry(s RetryStrategy, max int32) RetryStrategy {
+func LimitRetry(s RetryStrategy, max int) RetryStrategy {
 	return &limitedRetry{s: s, max: max}
 }
 
 func (r *limitedRetry) NextBackoff() time.Duration {
-	if atomic.LoadInt32(&r.cnt) >= r.max {
+	if atomic.LoadInt32(&r.cnt) >= int32(r.max) {
 		return 0
 	}
 	atomic.AddInt32(&r.cnt, 1)
