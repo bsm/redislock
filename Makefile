@@ -3,6 +3,9 @@ default: test
 test:
 	go test ./...
 
+test-race:
+	go test ./... -race
+
 doc: README.md
 
 .PHONY: default test
