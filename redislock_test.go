@@ -2,32 +2,34 @@ package redislock_test
 
 import (
 	"context"
+	"fmt"
+	"math/rand"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
-	"github.com/bsm/redislock"
+	. "github.com/bsm/ginkgo"
+	. "github.com/bsm/gomega"
+	. "github.com/bsm/redislock"
 	"github.com/go-redis/redis/v8"
-	. "github.com/onsi/ginkgo"
-	. "github.com/onsi/gomega"
 )
 
 const lockKey = "__bsm_redislock_unit_test__"
 
 var _ = Describe("Client", func() {
-	var subject *redislock.Client
+	var subject *Client
 	var ctx = context.Background()
 
 	BeforeEach(func() {
-		subject = redislock.New(redisClient)
+		subject = New(redisClient)
 	})
 
 	AfterEach(func() {
 		Expect(redisClient.Del(ctx, lockKey).Err()).To(Succeed())
 	})
 
-	It("should obtain once with TTL", func() {
+	It("obtains once with TTL", func() {
 		lock1, err := subject.Obtain(ctx, lockKey, time.Hour, nil)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(lock1.Token()).To(HaveLen(22))
@@ -35,7 +37,7 @@ var _ = Describe("Client", func() {
 		defer lock1.Release(ctx)
 
 		_, err = subject.Obtain(ctx, lockKey, time.Hour, nil)
-		Expect(err).To(Equal(redislock.ErrNotObtained))
+		Expect(err).To(Equal(ErrNotObtained))
 		Expect(lock1.Release(ctx)).To(Succeed())
 
 		lock2, err := subject.Obtain(ctx, lockKey, time.Minute, nil)
@@ -44,21 +46,21 @@ var _ = Describe("Client", func() {
 		Expect(lock2.Release(ctx)).To(Succeed())
 	})
 
-	It("should obtain through short-cut", func() {
-		lock, err := redislock.Obtain(ctx, redisClient, lockKey, time.Hour, nil)
+	It("obtains through short-cut", func() {
+		lock, err := Obtain(ctx, redisClient, lockKey, time.Hour, nil)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(lock.Release(ctx)).To(Succeed())
 	})
 
-	It("should support custom metadata", func() {
-		lock, err := redislock.Obtain(ctx, redisClient, lockKey, time.Hour, &redislock.Options{Metadata: "my-data"})
+	It("supports custom metadata", func() {
+		lock, err := Obtain(ctx, redisClient, lockKey, time.Hour, &Options{Metadata: "my-data"})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(lock.Metadata()).To(Equal("my-data"))
 		Expect(lock.Release(ctx)).To(Succeed())
 	})
 
-	It("should refresh", func() {
-		lock, err := redislock.Obtain(ctx, redisClient, lockKey, time.Minute, nil)
+	It("refreshes", func() {
+		lock, err := Obtain(ctx, redisClient, lockKey, time.Minute, nil)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(lock.TTL(ctx)).To(BeNumerically("~", time.Minute, time.Second))
 		Expect(lock.Refresh(ctx, time.Hour, nil)).To(Succeed())
@@ -66,35 +68,35 @@ var _ = Describe("Client", func() {
 		Expect(lock.Release(ctx)).To(Succeed())
 	})
 
-	It("should fail to release if expired", func() {
-		lock, err := redislock.Obtain(ctx, redisClient, lockKey, time.Millisecond, nil)
+	It("fails to release if expired", func() {
+		lock, err := Obtain(ctx, redisClient, lockKey, time.Millisecond, nil)
 		Expect(err).NotTo(HaveOccurred())
 		time.Sleep(5 * time.Millisecond)
-		Expect(lock.Release(ctx)).To(MatchError(redislock.ErrLockNotHeld))
+		Expect(lock.Release(ctx)).To(MatchError(ErrLockNotHeld))
 	})
 
-	It("should fail to release if ontained by someone else", func() {
-		lock, err := redislock.Obtain(ctx, redisClient, lockKey, time.Minute, nil)
+	It("fails to release if ontained by someone else", func() {
+		lock, err := Obtain(ctx, redisClient, lockKey, time.Minute, nil)
 		Expect(err).NotTo(HaveOccurred())
 
 		Expect(redisClient.Set(ctx, lockKey, "ABCD", 0).Err()).NotTo(HaveOccurred())
-		Expect(lock.Release(ctx)).To(MatchError(redislock.ErrLockNotHeld))
+		Expect(lock.Release(ctx)).To(MatchError(ErrLockNotHeld))
 	})
 
-	It("should fail to refresh if expired", func() {
-		lock, err := redislock.Obtain(ctx, redisClient, lockKey, time.Millisecond, nil)
+	It("fails to refresh if expired", func() {
+		lock, err := Obtain(ctx, redisClient, lockKey, time.Millisecond, nil)
 		Expect(err).NotTo(HaveOccurred())
 		time.Sleep(5 * time.Millisecond)
-		Expect(lock.Refresh(ctx, time.Hour, nil)).To(MatchError(redislock.ErrNotObtained))
+		Expect(lock.Refresh(ctx, time.Hour, nil)).To(MatchError(ErrNotObtained))
 	})
 
-	It("should retry if enabled", func() {
+	It("retries if enabled", func() {
 		// retry, succeed
 		Expect(redisClient.Set(ctx, lockKey, "ABCD", 0).Err()).NotTo(HaveOccurred())
 		Expect(redisClient.PExpire(ctx, lockKey, 20*time.Millisecond).Err()).NotTo(HaveOccurred())
 
-		lock, err := redislock.Obtain(ctx, redisClient, lockKey, time.Hour, &redislock.Options{
-			RetryStrategy: redislock.LimitRetry(redislock.LinearBackoff(100*time.Millisecond), 3),
+		lock, err := Obtain(ctx, redisClient, lockKey, time.Hour, &Options{
+			RetryStrategy: LimitRetry(LinearBackoff(100*time.Millisecond), 3),
 		})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(lock.Release(ctx)).To(Succeed())
@@ -103,81 +105,34 @@ var _ = Describe("Client", func() {
 		Expect(redisClient.Set(ctx, lockKey, "ABCD", 0).Err()).NotTo(HaveOccurred())
 		Expect(redisClient.PExpire(ctx, lockKey, 50*time.Millisecond).Err()).NotTo(HaveOccurred())
 
-		_, err = redislock.Obtain(ctx, redisClient, lockKey, time.Hour, nil)
-		Expect(err).To(MatchError(redislock.ErrNotObtained))
+		_, err = Obtain(ctx, redisClient, lockKey, time.Hour, nil)
+		Expect(err).To(MatchError(ErrNotObtained))
 
 		// retry 2x, give up & fail
 		Expect(redisClient.Set(ctx, lockKey, "ABCD", 0).Err()).NotTo(HaveOccurred())
 		Expect(redisClient.PExpire(ctx, lockKey, 50*time.Millisecond).Err()).NotTo(HaveOccurred())
 
-		_, err = redislock.Obtain(ctx, redisClient, lockKey, time.Hour, &redislock.Options{
-			RetryStrategy: redislock.LimitRetry(redislock.LinearBackoff(time.Millisecond), 2),
+		_, err = Obtain(ctx, redisClient, lockKey, time.Hour, &Options{
+			RetryStrategy: LimitRetry(LinearBackoff(time.Millisecond), 2),
 		})
-		Expect(err).To(MatchError(redislock.ErrNotObtained))
+		Expect(err).To(MatchError(ErrNotObtained))
 	})
 
-	It("should prevent multiple locks (fuzzing)", func() {
+	It("prevents multiple locks (fuzzing)", func() {
 		numLocks := int32(0)
 		wg := new(sync.WaitGroup)
-		for i := 0; i < 1000; i++ {
+		for i := 0; i < 100; i++ {
 			wg.Add(1)
 
 			go func() {
 				defer GinkgoRecover()
 				defer wg.Done()
+
+				wait := rand.Int63n(int64(10 * time.Millisecond))
+				time.Sleep(time.Duration(wait))
 
 				_, err := subject.Obtain(ctx, lockKey, time.Minute, nil)
-				if err == redislock.ErrNotObtained {
-					return
-				}
-				Expect(err).NotTo(HaveOccurred())
-				atomic.AddInt32(&numLocks, 1)
-			}()
-		}
-		wg.Wait()
-		Expect(numLocks).To(Equal(int32(1)))
-	})
-
-	It("should prevent multiple locks with linear retry (fuzzing)", func() {
-		numLocks := int32(0)
-		wg := new(sync.WaitGroup)
-		var cacheOpts = &redislock.Options{
-			RetryStrategy: redislock.LimitRetry(redislock.LinearBackoff(30*time.Millisecond), 10),
-		}
-		for i := 0; i < 1000; i++ {
-			wg.Add(1)
-
-			go func() {
-				defer GinkgoRecover()
-				defer wg.Done()
-
-				_, err := subject.Obtain(ctx, lockKey, time.Minute, cacheOpts)
-				if err == redislock.ErrNotObtained {
-					return
-				}
-				Expect(err).NotTo(HaveOccurred())
-				atomic.AddInt32(&numLocks, 1)
-			}()
-		}
-		wg.Wait()
-		Expect(numLocks).To(Equal(int32(1)))
-	})
-
-	It("should prevent multiple locks with exponential retry (fuzzing)", func() {
-		numLocks := int32(0)
-		wg := new(sync.WaitGroup)
-		var cacheOpts = &redislock.Options{
-			RetryStrategy: redislock.LimitRetry(redislock.ExponentialBackoff(30*time.Millisecond, 5*time.Second), 10),
-		}
-		for i := 0; i < 1000; i++ {
-			wg.Add(1)
-
-			go func() {
-				defer GinkgoRecover()
-				defer wg.Done()
-
-				_, err := subject.Obtain(ctx, lockKey, time.Minute, cacheOpts)
-				if err == redislock.ErrNotObtained {
+				if err == ErrNotObtained {
 					return
 				}
 				Expect(err).NotTo(HaveOccurred())
@@ -190,26 +145,28 @@ var _ = Describe("Client", func() {
 })
 
 var _ = Describe("RetryStrategy", func() {
-	It("should support no-retry", func() {
-		subject := redislock.NoRetry()
+	It("supports no-retry", func() {
+		subject := NoRetry()
 		Expect(subject.NextBackoff()).To(Equal(time.Duration(0)))
 	})
 
-	It("should support linear backoff", func() {
-		subject := redislock.LinearBackoff(time.Second)
+	It("supports linear backoff", func() {
+		subject := LinearBackoff(time.Second)
 		Expect(subject.NextBackoff()).To(Equal(time.Second))
 		Expect(subject.NextBackoff()).To(Equal(time.Second))
+		Expect(subject).To(beThreadSafe{})
 	})
 
-	It("should support limits", func() {
-		subject := redislock.LimitRetry(redislock.LinearBackoff(time.Second), 2)
+	It("supports limits", func() {
+		subject := LimitRetry(LinearBackoff(time.Second), 2)
 		Expect(subject.NextBackoff()).To(Equal(time.Second))
 		Expect(subject.NextBackoff()).To(Equal(time.Second))
 		Expect(subject.NextBackoff()).To(Equal(time.Duration(0)))
+		Expect(subject).To(beThreadSafe{})
 	})
 
-	It("should support exponential backoff", func() {
-		subject := redislock.ExponentialBackoff(10*time.Millisecond, 300*time.Millisecond)
+	It("supports exponential backoff", func() {
+		subject := ExponentialBackoff(10*time.Millisecond, 300*time.Millisecond)
 		Expect(subject.NextBackoff()).To(Equal(10 * time.Millisecond))
 		Expect(subject.NextBackoff()).To(Equal(10 * time.Millisecond))
 		Expect(subject.NextBackoff()).To(Equal(16 * time.Millisecond))
@@ -220,6 +177,7 @@ var _ = Describe("RetryStrategy", func() {
 		Expect(subject.NextBackoff()).To(Equal(300 * time.Millisecond))
 		Expect(subject.NextBackoff()).To(Equal(300 * time.Millisecond))
 		Expect(subject.NextBackoff()).To(Equal(300 * time.Millisecond))
+		Expect(subject).To(beThreadSafe{})
 	})
 })
 
@@ -243,3 +201,35 @@ var _ = BeforeSuite(func() {
 var _ = AfterSuite(func() {
 	Expect(redisClient.Close()).To(Succeed())
 })
+
+type beThreadSafe struct{}
+
+func (beThreadSafe) Match(actual interface{}) (bool, error) {
+	strategy, ok := actual.(RetryStrategy)
+	if !ok {
+		return false, fmt.Errorf("beThreadSafe matcher expects a RetryStrategy")
+	}
+
+	wg := new(sync.WaitGroup)
+	for i := 0; i < 1000; i++ {
+		wg.Add(1)
+
+		go func() {
+			defer GinkgoRecover()
+			defer wg.Done()
+
+			strategy.NextBackoff()
+		}()
+	}
+	wg.Wait()
+
+	return true, nil
+}
+
+func (beThreadSafe) FailureMessage(actual interface{}) (message string) {
+	return fmt.Sprintf("Expected\n\t%T\nto be thread-safe", actual)
+}
+
+func (beThreadSafe) NegatedFailureMessage(actual interface{}) (message string) {
+	return fmt.Sprintf("Expected\n\t%T\nnot to be thread-safe", actual)
+}

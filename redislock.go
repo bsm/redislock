@@ -236,25 +236,25 @@ func (r linearBackoff) NextBackoff() time.Duration {
 
 type limitedRetry struct {
 	s   RetryStrategy
-	cnt int32
-	max int
+	cnt int64
+	max int64
 }
 
 // LimitRetry limits the number of retries to max attempts.
 func LimitRetry(s RetryStrategy, max int) RetryStrategy {
-	return &limitedRetry{s: s, max: max}
+	return &limitedRetry{s: s, max: int64(max)}
 }
 
 func (r *limitedRetry) NextBackoff() time.Duration {
-	if atomic.LoadInt32(&r.cnt) >= int32(r.max) {
+	if atomic.LoadInt64(&r.cnt) >= r.max {
 		return 0
 	}
-	atomic.AddInt32(&r.cnt, 1)
+	atomic.AddInt64(&r.cnt, 1)
 	return r.s.NextBackoff()
 }
 
 type exponentialBackoff struct {
-	cnt uint32
+	cnt uint64
 
 	min, max time.Duration
 }
@@ -266,7 +266,7 @@ func ExponentialBackoff(min, max time.Duration) RetryStrategy {
 }
 
 func (r *exponentialBackoff) NextBackoff() time.Duration {
-	cnt := atomic.AddUint32(&r.cnt, 1)
+	cnt := atomic.AddUint64(&r.cnt, 1)
 
 	ms := 2 << 25
 	if cnt < 25 {
