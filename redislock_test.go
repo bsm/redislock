@@ -2,7 +2,6 @@ package redislock_test
 
 import (
 	"context"
-	"math/rand"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -127,9 +126,6 @@ var _ = Describe("Client", func() {
 				defer GinkgoRecover()
 				defer wg.Done()
 
-				wait := rand.Int63n(int64(50 * time.Millisecond))
-				time.Sleep(time.Duration(wait))
-
 				_, err := subject.Obtain(ctx, lockKey, time.Minute, nil)
 				if err == redislock.ErrNotObtained {
 					return
@@ -142,6 +138,55 @@ var _ = Describe("Client", func() {
 		Expect(numLocks).To(Equal(int32(1)))
 	})
 
+	It("should prevent multiple locks with linear retry (fuzzing)", func() {
+		numLocks := int32(0)
+		wg := new(sync.WaitGroup)
+		var cacheOpts = &redislock.Options{
+			RetryStrategy: redislock.LimitRetry(redislock.LinearBackoff(30*time.Millisecond), 10),
+		}
+		for i := 0; i < 1000; i++ {
+			wg.Add(1)
+
+			go func() {
+				defer GinkgoRecover()
+				defer wg.Done()
+
+				_, err := subject.Obtain(ctx, lockKey, time.Minute, cacheOpts)
+				if err == redislock.ErrNotObtained {
+					return
+				}
+				Expect(err).NotTo(HaveOccurred())
+				atomic.AddInt32(&numLocks, 1)
+			}()
+		}
+		wg.Wait()
+		Expect(numLocks).To(Equal(int32(1)))
+	})
+
+	It("should prevent multiple locks with exponential retry (fuzzing)", func() {
+		numLocks := int32(0)
+		wg := new(sync.WaitGroup)
+		var cacheOpts = &redislock.Options{
+			RetryStrategy: redislock.LimitRetry(redislock.ExponentialBackoff(30*time.Millisecond, 5*time.Second), 10),
+		}
+		for i := 0; i < 1000; i++ {
+			wg.Add(1)
+
+			go func() {
+				defer GinkgoRecover()
+				defer wg.Done()
+
+				_, err := subject.Obtain(ctx, lockKey, time.Minute, cacheOpts)
+				if err == redislock.ErrNotObtained {
+					return
+				}
+				Expect(err).NotTo(HaveOccurred())
+				atomic.AddInt32(&numLocks, 1)
+			}()
+		}
+		wg.Wait()
+		Expect(numLocks).To(Equal(int32(1)))
+	})
 })
 
 var _ = Describe("RetryStrategy", func() {
