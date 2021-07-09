@@ -6,8 +6,8 @@ test:
 test-race:
 	go test ./... -race
 
-staticcheck:
-	staticcheck ./...
+lint:
+	golangci-lint run
 
 doc: README.md
 
