@@ -61,12 +61,16 @@ func (c *Client) Obtain(ctx context.Context, key string, ttl time.Duration, opt 
 	value := token + opt.getMetadata()
 	retry := opt.getRetryStrategy()
 
-	deadlinectx, cancel := context.WithDeadline(ctx, time.Now().Add(ttl))
-	defer cancel()
+	// make sure we don't retry forever
+	if _, ok := ctx.Deadline(); !ok {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithDeadline(ctx, time.Now().Add(ttl))
+		defer cancel()
+	}
 
 	var timer *time.Timer
 	for {
-		ok, err := c.obtain(deadlinectx, key, value, ttl)
+		ok, err := c.obtain(ctx, key, value, ttl)
 		if err != nil {
 			return nil, err
 		} else if ok {
@@ -86,7 +90,7 @@ func (c *Client) Obtain(ctx context.Context, key string, ttl time.Duration, opt 
 		}
 
 		select {
-		case <-deadlinectx.Done():
+		case <-ctx.Done():
 			return nil, ErrNotObtained
 		case <-timer.C:
 		}
