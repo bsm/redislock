@@ -142,6 +142,29 @@ var _ = Describe("Client", func() {
 		wg.Wait()
 		Expect(numLocks).To(Equal(int32(1)))
 	})
+
+	It("test the ttl strategy", func() {
+		numLocks := int32(0)
+		wg := new(sync.WaitGroup)
+		for i := 0; i < 100; i++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				strategy := TtlBackoff(true)
+				opt := Options{RetryStrategy: strategy}
+				lock, err := subject.TryLock(context.Background(), lockKey, 500*time.Millisecond, 500*time.Second, false, &opt)
+				if err != nil {
+					return
+				}
+				if lock.Key() != "" {
+					atomic.AddInt32(&numLocks, 1)
+				}
+				lock.ReleaseWithTryLock(ctx)
+			}()
+		}
+		wg.Wait()
+		Expect(numLocks).To(Equal(int32(100)))
+	})
 })
 
 var _ = Describe("RetryStrategy", func() {
@@ -177,6 +200,12 @@ var _ = Describe("RetryStrategy", func() {
 		Expect(subject.NextBackoff()).To(Equal(300 * time.Millisecond))
 		Expect(subject.NextBackoff()).To(Equal(300 * time.Millisecond))
 		Expect(subject.NextBackoff()).To(Equal(300 * time.Millisecond))
+		Expect(subject).To(beThreadSafe{})
+	})
+
+	It("supports ttl backoff", func() {
+		subject := TtlBackoff(true)
+		Expect(subject.NextBackoff()).To(Equal(time.Duration(-987654321)))
 		Expect(subject).To(beThreadSafe{})
 	})
 })
