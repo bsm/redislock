@@ -145,6 +145,7 @@ var _ = Describe("Client", func() {
 
 	It("test the ttl strategy", func() {
 		numLocks := int32(0)
+		numUnLocks := int32(0)
 		wg := new(sync.WaitGroup)
 		for i := 0; i < 100; i++ {
 			wg.Add(1)
@@ -152,18 +153,20 @@ var _ = Describe("Client", func() {
 				defer wg.Done()
 				strategy := TtlBackoff(true)
 				opt := Options{RetryStrategy: strategy}
-				lock, err := subject.TryLock(context.Background(), lockKey, 500*time.Millisecond, 500*time.Second, false, &opt)
+				lock, err := subject.TryLock(context.Background(), lockKey, 5*time.Second, 10*time.Second, false, &opt)
 				if err != nil {
 					return
 				}
 				if lock.Key() != "" {
 					atomic.AddInt32(&numLocks, 1)
+				} else {
+					atomic.AddInt32(&numUnLocks, 1)
 				}
 				lock.ReleaseWithTryLock(ctx)
 			}()
 		}
 		wg.Wait()
-		Expect(numLocks).To(Equal(int32(100)))
+		Expect(numLocks + numUnLocks).To(Equal(int32(100)))
 	})
 })
 
