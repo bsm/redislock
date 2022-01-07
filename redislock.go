@@ -25,7 +25,8 @@ var (
 	luaPTTL     = redis.NewScript(`if redis.call("get", KEYS[1]) == ARGV[1] then return redis.call("pttl", KEYS[1]) else return -3 end`)
 	luaAcquire  = redis.NewScript(`if (redis.call('exists', KEYS[1]) == 0) then redis.call('hset', KEYS[1], ARGV[2], 1); redis.call('pexpire', KEYS[1], ARGV[1]); return 0; end; if (redis.call('hexists', KEYS[1], ARGV[2]) == 1) then redis.call('hincrby', KEYS[1], ARGV[2], 1); redis.call('pexpire', KEYS[1], ARGV[1]); return 0; end; return redis.call('pttl', KEYS[1]);`)
 	luaExpire   = redis.NewScript(`if (redis.call('hexists', KEYS[1], ARGV[2]) == 1) then return redis.call('pexpire', KEYS[1], ARGV[1]) else return 0 end`)
-	luaRelease2 = redis.NewScript(`if (redis.call('hexists', KEYS[1], ARGV[2]) == 0) then  return 0; end; local counter = redis.call('hincrby', KEYS[1], ARGV[2], -1); if (counter > 0) then redis.call('pexpire', KEYS[1], ARGV[1]); return counter; else redis.call('del', KEYS[1]); redis.call('publish', KEYS[2], 'next'); end; return 0`)
+	luaRelease2 = redis.NewScript(`if (redis.call('hexists', KEYS[1], ARGV[2]) == 0) then redis.call('publish', KEYS[2], 'next'); return 0; end; local counter = redis.call('hincrby', KEYS[1], ARGV[2], -1); if (counter > 0) then redis.call('pexpire', KEYS[1], ARGV[1]); return counter; else redis.call('del', KEYS[1]); redis.call('publish', KEYS[2], 'next'); end; return 0`)
+	luaZSet     = redis.NewScript(`redis.call('zadd', KEYS[1], ARGV[1], ARGV[2]); redis.call('zremrangebyscore', KEYS[1], 0, ARGV[3]); return 0;`)
 )
 
 // The unique identifier used to store the watchDog, if it already exists, you don’t need to open a new one (to prevent recursive locking and open multiple watchDogs), it will be deleted when unlocked
@@ -42,16 +43,13 @@ var (
 // RedisClient is a minimal client interface.
 type RedisClient interface {
 	Subscribe(ctx context.Context, channels ...string) *redis.PubSub
-	Publish(ctx context.Context, channel string, message interface{}) *redis.IntCmd
-	RPush(ctx context.Context, key string, values ...interface{}) *redis.IntCmd
 	SetNX(ctx context.Context, key string, value interface{}, expiration time.Duration) *redis.BoolCmd
 	Eval(ctx context.Context, script string, keys []string, args ...interface{}) *redis.Cmd
 	EvalSha(ctx context.Context, sha1 string, keys []string, args ...interface{}) *redis.Cmd
 	ScriptExists(ctx context.Context, scripts ...string) *redis.BoolSliceCmd
 	ScriptLoad(ctx context.Context, script string) *redis.StringCmd
-	LIndex(ctx context.Context, key string, index int64) *redis.StringCmd
-	LRem(ctx context.Context, key string, count int64, value interface{}) *redis.IntCmd
-	LPop(ctx context.Context, key string) *redis.StringCmd
+	ZRevRange(ctx context.Context, key string, start, stop int64) *redis.StringSliceCmd
+	ZRem(ctx context.Context, key string, members ...interface{}) *redis.IntCmd
 }
 
 // Client wraps a redis client.
@@ -248,19 +246,17 @@ func (l *Lock) Release(ctx context.Context) error {
 // ReleaseWithTryLock controls the unlocking operation of TryLock
 // If there is no lock, it will be ignored.
 func (l *Lock) ReleaseWithTryLock(ctx context.Context) (bool, error) {
-	field := l.value
-	cmd := luaRelease2.Run(ctx, l.client.client, []string{l.key, l.key + "-pub"}, int(l.client.expire/time.Millisecond), field)
-	// Return 0 to indicate successful unlocking or no need to unlock, return value greater than 0 indicates that there is a recursive lock -1, and reset the time, the return value indicates the number of layers of remaining locks
+	cmd := luaRelease2.Run(ctx, l.client.client, []string{l.key, l.key + "-pub"}, int(l.client.expire/time.Millisecond), l.value)
 	res, err := cmd.Int64()
 	if err != nil {
 		return false, err
 	} else if res > 0 {
 	} else {
 		// If the unlock is successful or does not need to be unlocked, close the thread
-		if f, ok := hasWatchDog.Load(field); ok {
+		if f, ok := hasWatchDog.Load(l.value); ok {
 			err = f.(*promise.Future).Cancel()
 			if err != nil {
-				log.Println("Failed to close Future, field:", field)
+				log.Println("Failed to close Future, field:", l.value)
 				return false, err
 			}
 		}
@@ -447,17 +443,24 @@ func (c *Client) watchDog(ctx context.Context, key, field string, releaseTime ti
 // Use go-promise for subscription operation. By default, it is not your turn to lock in 5 seconds, enter spin to lock
 func (c *Client) pubsub(ctx context.Context, lockKey, field string, releaseTime time.Duration, isNeedScheduled bool) bool {
 	// Push your own id to the message queue and queue
-	c.client.RPush(ctx, lockKey+"-list", field)
+	cmd := luaZSet.Run(ctx, c.client, []string{lockKey + "-zset"}, time.Now().Add(c.timeout/3*2).UnixMicro(), field, time.Now().UnixMicro())
+	if cmd.Err() != nil {
+		log.Fatal(cmd.Err())
+		return false
+	}
 
 	// Subscribe to the channel, block the thread waiting for the message
 	pub := c.client.Subscribe(ctx, lockKey+"-pub")
 	f := promise.Start(func() (v interface{}, err error) {
 		for range pub.Channel() {
-			cmd := c.client.LIndex(ctx, lockKey+"-list", 0)
-			if cmd != nil && cmd.Val() == field {
+			cmd := c.client.ZRevRange(ctx, lockKey+"-zset", -1, -1)
+			if cmd != nil && cmd.Val()[0] == field {
 				ttl, _ := c.tryAcquire(ctx, lockKey, field, releaseTime, isNeedScheduled)
 				if ttl == 0 {
-					c.client.LPop(ctx, lockKey+"-list")
+					cmd := c.client.ZRem(ctx, lockKey+"-zset", field)
+					if cmd.Err() != nil {
+						log.Fatal(cmd.Err())
+					}
 					return true, nil
 				} else {
 					continue
@@ -466,10 +469,8 @@ func (c *Client) pubsub(ctx context.Context, lockKey, field string, releaseTime 
 		}
 		return false, nil
 	})
-	v, _, timeout := f.GetOrTimeout(uint((c.timeout / 3 * 2) / time.Millisecond))
-	if timeout {
-		c.client.LRem(ctx, lockKey+"-list", 1, field)
-	}
+	v, _, _ := f.GetOrTimeout(uint((c.timeout / 3 * 2) / time.Millisecond))
+
 	pub.Unsubscribe(ctx)
 	pub.Close()
 	if v != nil && v.(bool) {
