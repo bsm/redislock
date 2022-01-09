@@ -150,7 +150,7 @@ func (c *Client) tryAcquire(ctx context.Context, key, value string, releaseTime 
 
 	// Successfully locked, open WatchDog
 	if isNeedScheduled && ttl == 0 {
-		c.watchDog(ctx, key, key, 30*time.Second)
+		c.watchDog(ctx, key, value, 30*time.Second)
 	}
 
 	return ttl, nil
@@ -251,6 +251,7 @@ func (l *Lock) ReleaseWithTryLock(ctx context.Context) (bool, error) {
 	if err != nil {
 		return false, err
 	} else if res > 0 {
+		log.Println("The current lock has ", res, " levels left.")
 	} else {
 		// If the unlock is successful or does not need to be unlocked, close the thread
 		if f, ok := hasWatchDog.Load(l.value); ok {
