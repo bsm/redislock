@@ -25,7 +25,7 @@ var (
 	luaPTTL     = redis.NewScript(`if redis.call("get", KEYS[1]) == ARGV[1] then return redis.call("pttl", KEYS[1]) else return -3 end`)
 	luaAcquire  = redis.NewScript(`if (redis.call('exists', KEYS[1]) == 0) then redis.call('hset', KEYS[1], ARGV[2], 1); redis.call('pexpire', KEYS[1], ARGV[1]); return 0; end; if (redis.call('hexists', KEYS[1], ARGV[2]) == 1) then redis.call('hincrby', KEYS[1], ARGV[2], 1); redis.call('pexpire', KEYS[1], ARGV[1]); return 0; end; return redis.call('pttl', KEYS[1]);`)
 	luaExpire   = redis.NewScript(`if (redis.call('hexists', KEYS[1], ARGV[2]) == 1) then return redis.call('pexpire', KEYS[1], ARGV[1]) else return 0 end`)
-	luaRelease2 = redis.NewScript(`if (redis.call('hexists', KEYS[1], ARGV[2]) == 0) then redis.call('publish', KEYS[2], 'next'); return 0; end; local counter = redis.call('hincrby', KEYS[1], ARGV[2], -1); if (counter > 0) then redis.call('pexpire', KEYS[1], ARGV[1]); return counter; else redis.call('del', KEYS[1]); redis.call('publish', KEYS[2], 'next'); end; return 0`)
+	luaRelease2 = redis.NewScript(`if (redis.call('hexists', KEYS[1], ARGV[2]) == 0) then redis.call('publish', KEYS[2], 'next'); return 0; end; local counter = redis.call('hincrby', KEYS[1], ARGV[2], -1); if (counter > 0) then redis.call('pexpire', KEYS[1], ARGV[1]); return counter; else redis.call('del', KEYS[1]); redis.call('publish', KEYS[2], 'next'); return 0; end; `)
 	luaZSet     = redis.NewScript(`redis.call('zadd', KEYS[1], ARGV[1], ARGV[2]); redis.call('zremrangebyscore', KEYS[1], 0, ARGV[3]); return 0;`)
 )
 
@@ -186,6 +186,9 @@ func (c *Client) tryAcquire(ctx context.Context, key, value string, releaseTime 
 	if isNeedScheduled && ttl == 0 {
 		c.watchDog(ctx, key, value, 30*time.Second)
 	}
+	if ttl == 0 {
+		fmt.Println(value, "加锁了")
+	}
 
 	return ttl, nil
 }
@@ -277,9 +280,9 @@ func (l *Lock) Release(ctx context.Context) error {
 	return nil
 }
 
-// ReleaseWithTryLock controls the unlocking operation of TryLock
+// ReleaseWithTryObtain controls the unlocking operation of TryLock
 // If there is no lock, it will be ignored.
-func (l *Lock) ReleaseWithTryLock(ctx context.Context) (bool, error) {
+func (l *Lock) ReleaseWithTryObtain(ctx context.Context) (bool, error) {
 	cmd := luaRelease2.Run(ctx, l.client.client, []string{l.key, l.key + "-pub"}, int(l.client.expire/time.Millisecond), l.value)
 	res, err := cmd.Int64()
 	if err != nil {
@@ -295,6 +298,7 @@ func (l *Lock) ReleaseWithTryLock(ctx context.Context) (bool, error) {
 				return false, err
 			}
 		}
+		fmt.Println(l.value, "解锁了")
 	}
 
 	return true, nil
@@ -478,6 +482,7 @@ func (c *Client) watchDog(ctx context.Context, key, field string, releaseTime ti
 // Use go-promise for subscription operation. By default, it is not your turn to lock in 5 seconds, enter spin to lock
 func (c *Client) pubsub(ctx context.Context, lockKey, field string, releaseTime time.Duration, isNeedScheduled bool) bool {
 	// Push your own id to the message queue and queue
+	fmt.Println(field, "pub")
 	cmd := luaZSet.Run(ctx, c.client, []string{lockKey + "-zset"}, time.Now().Add(c.timeout/3*2).UnixMicro(), field, time.Now().UnixMicro())
 	if cmd.Err() != nil {
 		log.Fatal(cmd.Err())
