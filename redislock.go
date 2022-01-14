@@ -186,9 +186,6 @@ func (c *Client) tryAcquire(ctx context.Context, key, value string, releaseTime 
 	if isNeedScheduled && ttl == 0 {
 		c.watchDog(ctx, key, value, 30*time.Second)
 	}
-	if ttl == 0 {
-		fmt.Println(value, "加锁了")
-	}
 
 	return ttl, nil
 }
@@ -298,7 +295,6 @@ func (l *Lock) ReleaseWithTryObtain(ctx context.Context) (bool, error) {
 				return false, err
 			}
 		}
-		fmt.Println(l.value, "解锁了")
 	}
 
 	return true, nil
@@ -482,7 +478,6 @@ func (c *Client) watchDog(ctx context.Context, key, field string, releaseTime ti
 // Use go-promise for subscription operation. By default, it is not your turn to lock in 5 seconds, enter spin to lock
 func (c *Client) pubsub(ctx context.Context, lockKey, field string, releaseTime time.Duration, isNeedScheduled bool) bool {
 	// Push your own id to the message queue and queue
-	fmt.Println(field, "pub")
 	cmd := luaZSet.Run(ctx, c.client, []string{lockKey + "-zset"}, time.Now().Add(c.timeout/3*2).UnixMicro(), field, time.Now().UnixMicro())
 	if cmd.Err() != nil {
 		log.Fatal(cmd.Err())
