@@ -110,16 +110,15 @@ func (c *Client) Obtain(ctx context.Context, key string, ttl time.Duration, opt 
 	}
 }
 
-// TryLock can set the timeout period and whether to enable the automatic renewal of the daemon thread
-// If open the watchDog, the expiryTime will not be use.
-func (c *Client) TryLock(ctx context.Context, key string, expiryTime time.Duration, waitTime time.Duration, isNeedScheduled bool, opt *Options) (*Lock, error) {
+// TryObtain uses redis's publish and subscribe, and it is more efficient to wait for lock.
+func (c *Client) TryObtain(ctx context.Context, key string, expiryTime time.Duration, waitTime time.Duration, opt *Options) (*Lock, error) {
 	c.expire = expiryTime
 	c.timeout = waitTime
 
 	value := uuid.New().String() + "-" + strconv.Itoa(getGoroutineId())
 	retry := opt.getRetryStrategy()
 
-	ttl, err := c.tryAcquire(ctx, key, value, expiryTime, isNeedScheduled)
+	ttl, err := c.tryAcquire(ctx, key, value, expiryTime, false)
 	if err != nil {
 		return nil, err
 	}
@@ -127,13 +126,48 @@ func (c *Client) TryLock(ctx context.Context, key string, expiryTime time.Durati
 		return &Lock{client: c, key: key, value: value}, nil
 	}
 
+	// If there is no strategy of retry, return ErrNotObtained
+	if retry.NextBackoff() < 1 && retry.NextBackoff() != -987654321 {
+		return nil, ErrNotObtained
+	}
+
 	// Publish and subscribe to reduce waiting time
-	succ := c.pubsub(ctx, key, value, expiryTime, isNeedScheduled)
+	succ := c.pubsub(ctx, key, value, expiryTime, false)
 	if succ {
 		return &Lock{client: c, key: key, value: value}, nil
 	}
 	// CAS
-	return c.cas(ctx, key, value, expiryTime, waitTime, isNeedScheduled, retry)
+	return c.cas(ctx, key, value, expiryTime, waitTime, false, retry)
+}
+
+// TryObtainWithGuard uses redis's publish and subscribe, and it is more efficient to wait for lock.
+// It starts a daemon thread to ensure that the lock is not released prematurely.
+func (c *Client) TryObtainWithGuard(ctx context.Context, key string, waitTime time.Duration, opt *Options) (*Lock, error) {
+	c.timeout = waitTime
+
+	value := uuid.New().String() + "-" + strconv.Itoa(getGoroutineId())
+	retry := opt.getRetryStrategy()
+
+	ttl, err := c.tryAcquire(ctx, key, value, c.expire, true)
+	if err != nil {
+		return nil, err
+	}
+	if ttl == 0 {
+		return &Lock{client: c, key: key, value: value}, nil
+	}
+
+	// If there is no strategy of retry, return ErrNotObtained
+	if retry.NextBackoff() < 1 && retry.NextBackoff() != -987654321 {
+		return nil, ErrNotObtained
+	}
+
+	// Publish and subscribe to reduce waiting time
+	succ := c.pubsub(ctx, key, value, c.expire, true)
+	if succ {
+		return &Lock{client: c, key: key, value: value}, nil
+	}
+	// CAS
+	return c.cas(ctx, key, value, c.expire, waitTime, true, retry)
 }
 
 func (c *Client) obtain(ctx context.Context, key, value string, ttl time.Duration) (bool, error) {
@@ -472,8 +506,8 @@ func (c *Client) pubsub(ctx context.Context, lockKey, field string, releaseTime 
 	})
 	v, _, _ := f.GetOrTimeout(uint((c.timeout / 3 * 2) / time.Millisecond))
 
-	pub.Unsubscribe(ctx)
-	pub.Close()
+	defer pub.Unsubscribe(ctx)
+	defer pub.Close()
 	if v != nil && v.(bool) {
 		return true
 	} else {
@@ -494,17 +528,15 @@ func (c *Client) cas(ctx context.Context, key string, value string, expiryTime, 
 			return &Lock{client: c, key: key, value: value}, nil
 		}
 		backoff := retry.NextBackoff()
-		if backoff < 1 {
-			if backoff != -987654321 {
-				return nil, ErrNotObtained
+
+		if backoff == -987654321 {
+			if ttl < 300 {
+				backoff = time.Duration(ttl)
 			} else {
-				if ttl < 300 {
-					backoff = time.Duration(ttl)
-				} else {
-					backoff = time.Duration(ttl / 3)
-				}
+				backoff = time.Duration(ttl / 3)
 			}
 		}
+
 		if timer == nil {
 			timer = time.NewTimer(backoff * time.Microsecond)
 			defer timer.Stop()

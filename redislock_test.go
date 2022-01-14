@@ -153,7 +153,33 @@ var _ = Describe("Client", func() {
 				defer wg.Done()
 				strategy := TtlBackoff(true)
 				opt := Options{RetryStrategy: strategy}
-				lock, err := subject.TryLock(context.Background(), lockKey, 5*time.Second, 10*time.Second, false, &opt)
+				lock, err := subject.TryObtain(context.Background(), lockKey, 5*time.Second, 10*time.Second, &opt)
+				if err != nil {
+					return
+				}
+				if lock.Key() != "" {
+					atomic.AddInt32(&numLocks, 1)
+				} else {
+					atomic.AddInt32(&numUnLocks, 1)
+				}
+				lock.ReleaseWithTryLock(ctx)
+			}()
+		}
+		wg.Wait()
+		Expect(numLocks + numUnLocks).To(Equal(int32(100)))
+	})
+
+	It("test the ttl strategy with guard", func() {
+		numLocks := int32(0)
+		numUnLocks := int32(0)
+		wg := new(sync.WaitGroup)
+		for i := 0; i < 100; i++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				strategy := TtlBackoff(true)
+				opt := Options{RetryStrategy: strategy}
+				lock, err := subject.TryObtainWithGuard(context.Background(), lockKey, 10*time.Second, &opt)
 				if err != nil {
 					return
 				}
