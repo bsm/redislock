@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	. "github.com/bsm/redislock"
+	. "github.com/Ohbibi/redislock"
 	"github.com/go-redis/redis/v8"
 )
 
@@ -232,6 +232,61 @@ func TestLock_Release_not_own(t *testing.T) {
 	if exp, got := ErrLockNotHeld, lock.Release(ctx); !errors.Is(got, exp) {
 		t.Fatalf("expected %v, got %v", exp, got)
 	}
+}
+
+func TestLock_ObtainMany(t *testing.T) {
+	ctx := context.Background()
+	rc := redis.NewClient(redisOpts)
+	defer teardown(t, rc)
+
+	// 1. Obtain lock 1 and 2
+	lock12, err := ObtainMany(ctx, rc, []string{"_ManyLock_1", "_ManyLock_2"}, time.Hour, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// 2. Obtain lock 3 and 4
+	lock34, err := ObtainMany(ctx, rc, []string{"_ManyLock_3", "_ManyLock_4"}, time.Hour, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// 3. Try to obtain lock 2 and 3
+	_, err = ObtainMany(ctx, rc, []string{"_ManyLock_2", "_ManyLock_3"}, time.Hour, nil)
+	// Expect it to fail since lock 2 and 3 are already locked.
+	if err == nil {
+		t.Fatal("expected error, got nothing.")
+	}
+
+	// 4. Release lock 1 and 2
+	lock12.Release(ctx)
+
+	// 5. Obtain lock 1
+	lock1, err := ObtainMany(ctx, rc, []string{"_ManyLock_1"}, time.Hour, nil)
+	// Expected to succeed since lock 1 was released (along with lock 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lock1.Release(ctx)
+
+	// 6. Try to obtain lock 2 and 3 (again)
+	_, err = ObtainMany(ctx, rc, []string{"_ManyLock_2", "_ManyLock_3"}, time.Hour, nil)
+	// Expect it to fail since lock 3 is still locked.
+	if err == nil {
+		t.Fatal("expected error, got nothing.")
+	}
+
+	// 7. Release lock 3 and 4
+	lock34.Release(ctx)
+
+	// 8. Try to obtain lock 2 and 3 (again)
+	lock23, err := ObtainMany(ctx, rc, []string{"_ManyLock_2", "_ManyLock_3"}, time.Hour, nil)
+	// Expect it to succeed since lock 2 and 3 are available.
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	defer lock23.Release(ctx)
 }
 
 func quickObtain(t *testing.T, rc *redis.Client, ttl time.Duration) *Lock {

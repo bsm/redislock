@@ -3,10 +3,11 @@ package redislock
 import (
 	"context"
 	"crypto/rand"
+	_ "embed"
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"io"
-	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -14,10 +15,23 @@ import (
 	"github.com/go-redis/redis/v8"
 )
 
+//go:embed release.lua
+var luaReleaseScript string
+
+//go:embed refresh.lua
+var luaRefeshScript string
+
+//go:embed pttl.lua
+var luaPTTLScript string
+
+//go:embed msetnxex.lua
+var luaMSetNXEXScript string
+
 var (
-	luaRefresh = redis.NewScript(`if redis.call("get", KEYS[1]) == ARGV[1] then return redis.call("pexpire", KEYS[1], ARGV[2]) else return 0 end`)
-	luaRelease = redis.NewScript(`if redis.call("get", KEYS[1]) == ARGV[1] then return redis.call("del", KEYS[1]) else return 0 end`)
-	luaPTTL    = redis.NewScript(`if redis.call("get", KEYS[1]) == ARGV[1] then return redis.call("pttl", KEYS[1]) else return -3 end`)
+	luaRefresh  = redis.NewScript(luaRefeshScript)
+	luaRelease  = redis.NewScript(luaReleaseScript)
+	luaPTTL     = redis.NewScript(luaPTTLScript)
+	luaMSetNXEX = redis.NewScript(luaMSetNXEXScript)
 )
 
 var (
@@ -31,6 +45,8 @@ var (
 // RedisClient is a minimal client interface.
 type RedisClient interface {
 	SetNX(ctx context.Context, key string, value interface{}, expiration time.Duration) *redis.BoolCmd
+	MSetNX(ctx context.Context, values ...interface{}) *redis.BoolCmd
+	TTL(ctx context.Context, key string) *redis.DurationCmd
 	Eval(ctx context.Context, script string, keys []string, args ...interface{}) *redis.Cmd
 	EvalSha(ctx context.Context, sha1 string, keys []string, args ...interface{}) *redis.Cmd
 	ScriptExists(ctx context.Context, scripts ...string) *redis.BoolSliceCmd
@@ -52,6 +68,14 @@ func New(client RedisClient) *Client {
 // Obtain tries to obtain a new lock using a key with the given TTL.
 // May return ErrNotObtained if not successful.
 func (c *Client) Obtain(ctx context.Context, key string, ttl time.Duration, opt *Options) (*Lock, error) {
+	return c.ObtainMany(ctx, []string{key}, ttl, opt)
+}
+
+// Obtain tries to obtain a new locks using keys with the given TTL.
+// If any of requested key are already locked, no additional keys are
+// locked and ErrNotObtained is returned.
+// May return ErrNotObtained if not successful.
+func (c *Client) ObtainMany(ctx context.Context, keys []string, ttl time.Duration, opt *Options) (*Lock, error) {
 	// Create a random token
 	token, err := c.randomToken()
 	if err != nil {
@@ -69,12 +93,15 @@ func (c *Client) Obtain(ctx context.Context, key string, ttl time.Duration, opt 
 	}
 
 	var timer *time.Timer
+	for i := range keys {
+		keys[i] = "redislock_" + keys[i]
+	}
 	for {
-		ok, err := c.obtain(ctx, key, value, ttl)
+		ok, err := c.obtain(ctx, keys, value, ttl)
 		if err != nil {
 			return nil, err
 		} else if ok {
-			return &Lock{client: c, key: key, value: value}, nil
+			return &Lock{client: c, keys: keys, value: value}, nil
 		}
 
 		backoff := retry.NextBackoff()
@@ -97,8 +124,16 @@ func (c *Client) Obtain(ctx context.Context, key string, ttl time.Duration, opt 
 	}
 }
 
-func (c *Client) obtain(ctx context.Context, key, value string, ttl time.Duration) (bool, error) {
-	return c.client.SetNX(ctx, key, value, ttl).Result()
+func (c *Client) obtain(ctx context.Context, keys []string, value string, ttl time.Duration) (bool, error) {
+	setArgs := []string{}
+	for _, k := range keys {
+		setArgs = append(setArgs, k, value)
+	}
+	res, err := luaMSetNXEX.Run(ctx, c.client, setArgs, ttl.Milliseconds()).Result()
+	if err != nil {
+		return false, fmt.Errorf("msetnx failed: %s", err)
+	}
+	return res == int64(len(keys)), nil
 }
 
 func (c *Client) randomToken() (string, error) {
@@ -120,7 +155,7 @@ func (c *Client) randomToken() (string, error) {
 // Lock represents an obtained, distributed lock.
 type Lock struct {
 	client *Client
-	key    string
+	keys   []string
 	value  string
 }
 
@@ -129,9 +164,14 @@ func Obtain(ctx context.Context, client RedisClient, key string, ttl time.Durati
 	return New(client).Obtain(ctx, key, ttl, opt)
 }
 
+// Obtain is a short-cut for New(...).ObtainMany(...).
+func ObtainMany(ctx context.Context, client RedisClient, keys []string, ttl time.Duration, opt *Options) (*Lock, error) {
+	return New(client).ObtainMany(ctx, keys, ttl, opt)
+}
+
 // Key returns the redis key used by the lock.
-func (l *Lock) Key() string {
-	return l.key
+func (l *Lock) Keys() []string {
+	return l.keys
 }
 
 // Token returns the token value set by the lock.
@@ -146,7 +186,8 @@ func (l *Lock) Metadata() string {
 
 // TTL returns the remaining time-to-live. Returns 0 if the lock has expired.
 func (l *Lock) TTL(ctx context.Context) (time.Duration, error) {
-	res, err := luaPTTL.Run(ctx, l.client.client, []string{l.key}, l.value).Result()
+	res, err := luaPTTL.Run(ctx, l.client.client, l.keys, l.value).Result()
+	// fmt.Printf("luaPTTL: %v, %v\n", res, err)
 	if err == redis.Nil {
 		return 0, nil
 	} else if err != nil {
@@ -162,11 +203,12 @@ func (l *Lock) TTL(ctx context.Context) (time.Duration, error) {
 // Refresh extends the lock with a new TTL.
 // May return ErrNotObtained if refresh is unsuccessful.
 func (l *Lock) Refresh(ctx context.Context, ttl time.Duration, opt *Options) error {
-	ttlVal := strconv.FormatInt(int64(ttl/time.Millisecond), 10)
-	status, err := luaRefresh.Run(ctx, l.client.client, []string{l.key}, l.value, ttlVal).Result()
+	res, err := luaRefresh.Run(ctx, l.client.client, l.keys, l.value, ttl.Milliseconds()).Result()
+	// fmt.Printf("luaRefresh: %v, %v\n", res, err)
 	if err != nil {
 		return err
-	} else if status == int64(1) {
+	}
+	if refreshCount := res.(int64); refreshCount == int64(len(l.keys)) {
 		return nil
 	}
 	return ErrNotObtained
@@ -175,14 +217,15 @@ func (l *Lock) Refresh(ctx context.Context, ttl time.Duration, opt *Options) err
 // Release manually releases the lock.
 // May return ErrLockNotHeld.
 func (l *Lock) Release(ctx context.Context) error {
-	res, err := luaRelease.Run(ctx, l.client.client, []string{l.key}, l.value).Result()
+	res, err := luaRelease.Run(ctx, l.client.client, l.keys, l.value).Result()
+	// fmt.Printf("luaRelease: %v, %v\n", res, err)
 	if err == redis.Nil {
 		return ErrLockNotHeld
 	} else if err != nil {
 		return err
 	}
 
-	if i, ok := res.(int64); !ok || i != 1 {
+	if releaseCount := res.(int64); releaseCount != int64(len(l.keys)) {
 		return ErrLockNotHeld
 	}
 	return nil

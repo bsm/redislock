@@ -6,7 +6,7 @@ import (
 	"log"
 	"time"
 
-	"github.com/bsm/redislock"
+	"github.com/Ohbibi/redislock"
 	"github.com/go-redis/redis/v8"
 )
 
@@ -27,8 +27,10 @@ func Example() {
 	lock, err := locker.Obtain(ctx, "my-key", 100*time.Millisecond, nil)
 	if err == redislock.ErrNotObtained {
 		fmt.Println("Could not obtain lock!")
+		return
 	} else if err != nil {
 		log.Fatalln(err)
+		return
 	}
 
 	// Don't forget to defer Release.
