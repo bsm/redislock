@@ -10,7 +10,7 @@ import (
 	"time"
 
 	. "github.com/bsm/redislock"
-	"github.com/go-redis/redis/v8"
+	"github.com/go-redis/redis/v9"
 )
 
 const lockKey = "__bsm_redislock_unit_test__"
