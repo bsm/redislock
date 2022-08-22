@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/bsm/redislock"
-	"github.com/go-redis/redis/v8"
+	"github.com/go-redis/redis/v9"
 )
 
 func Example() {
