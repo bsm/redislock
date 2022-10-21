@@ -32,6 +32,7 @@ var (
 type RedisClient interface {
 	redis.Scripter
 	SetNX(ctx context.Context, key string, value interface{}, expiration time.Duration) *redis.BoolCmd
+	Get(ctx context.Context, key string) *redis.StringCmd
 }
 
 // Client wraps a redis client.
@@ -49,13 +50,22 @@ func New(client RedisClient) *Client {
 // Obtain tries to obtain a new lock using a key with the given TTL.
 // May return ErrNotObtained if not successful.
 func (c *Client) Obtain(ctx context.Context, key string, ttl time.Duration, opt *Options) (*Lock, error) {
-	// Create a random token
-	token, err := c.randomToken()
-	if err != nil {
-		return nil, err
+	var (
+		value, token string
+		err          error
+	)
+
+	if opt.getSecret() != "" {
+		token = opt.getSecret()
+	} else {
+		// Create a random token
+		token, err = c.randomToken()
+		if err != nil {
+			return nil, err
+		}
 	}
 
-	value := token + opt.getMetadata()
+	value = token + opt.getMetadata()
 	retry := opt.getRetryStrategy()
 
 	// make sure we don't retry forever
@@ -95,7 +105,20 @@ func (c *Client) Obtain(ctx context.Context, key string, ttl time.Duration, opt 
 }
 
 func (c *Client) obtain(ctx context.Context, key, value string, ttl time.Duration) (bool, error) {
-	return c.client.SetNX(ctx, key, value, ttl).Result()
+	ok, err := c.client.SetNX(ctx, key, value, ttl).Result()
+
+	if !ok {
+		storedkey, err := c.client.Get(ctx, key).Result()
+		if err != nil {
+			return false, err
+		}
+
+		if storedkey == value {
+			return true, err
+		}
+	}
+
+	return ok, err
 }
 
 func (c *Client) randomToken() (string, error) {
@@ -195,6 +218,16 @@ type Options struct {
 
 	// Metadata string is appended to the lock token.
 	Metadata string
+
+	// Secret string can be used as the token
+	Secret string
+}
+
+func (o *Options) getSecret() string {
+	if o != nil {
+		return o.Secret
+	}
+	return ""
 }
 
 func (o *Options) getMetadata() string {
