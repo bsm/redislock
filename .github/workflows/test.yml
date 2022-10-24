@@ -12,9 +12,10 @@ jobs:
     strategy:
       matrix:
         go-version: [1.18.x, 1.19.x]
+        redis-version: [6-alpine, 7-alpine]
     services:
       redis:
-        image: redis:6-alpine
+        image: redis:${{ matrix.redis-version }}
         ports:
           - 6379:6379
     steps:

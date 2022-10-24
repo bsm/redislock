@@ -65,7 +65,7 @@ func (c *Client) Obtain(ctx context.Context, key string, ttl time.Duration, opt 
 		defer cancel()
 	}
 
-	var timer *time.Timer
+	var ticker *time.Ticker
 	for {
 		ok, err := c.obtain(ctx, key, value, ttl)
 		if err != nil {
@@ -79,17 +79,15 @@ func (c *Client) Obtain(ctx context.Context, key string, ttl time.Duration, opt 
 			return nil, ErrNotObtained
 		}
 
-		if timer == nil {
-			timer = time.NewTimer(backoff)
-			defer timer.Stop()
-		} else {
-			timer.Reset(backoff)
+		if ticker == nil {
+			ticker = time.NewTicker(backoff)
+			defer ticker.Stop()
 		}
 
 		select {
 		case <-ctx.Done():
 			return nil, ErrNotObtained
-		case <-timer.C:
+		case <-ticker.C:
 		}
 	}
 }
