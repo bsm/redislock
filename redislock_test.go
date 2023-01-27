@@ -10,14 +10,15 @@ import (
 	"time"
 
 	. "github.com/bsm/redislock"
-	"github.com/go-redis/redis/v9"
+	"github.com/redis/go-redis/v9"
 )
 
 const lockKey = "__bsm_redislock_unit_test__"
 
 var redisOpts = &redis.Options{
 	Network: "tcp",
-	Addr:    "127.0.0.1:6379", DB: 9,
+	Addr:    "127.0.0.1:6379",
+	DB:      9,
 }
 
 func TestClient(t *testing.T) {
