@@ -2,6 +2,7 @@ package redislock_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"time"
@@ -25,7 +26,7 @@ func Example() {
 
 	// Try to obtain lock.
 	lock, err := locker.Obtain(ctx, "my-key", 100*time.Millisecond, nil)
-	if err == redislock.ErrNotObtained {
+	if errors.Is(err, &redislock.ErrNotObtained{}) {
 		fmt.Println("Could not obtain lock!")
 	} else if err != nil {
 		log.Fatalln(err)
@@ -77,7 +78,7 @@ func ExampleClient_Obtain_retry() {
 	lock, err := locker.Obtain(ctx, "my-key", time.Second, &redislock.Options{
 		RetryStrategy: backoff,
 	})
-	if err == redislock.ErrNotObtained {
+	if errors.Is(err, &redislock.ErrNotObtained{}) {
 		fmt.Println("Could not obtain lock!")
 	} else if err != nil {
 		log.Fatalln(err)
@@ -102,7 +103,7 @@ func ExampleClient_Obtain_customDeadline() {
 	lock, err := locker.Obtain(ctx, "my-key", time.Second, &redislock.Options{
 		RetryStrategy: backoff,
 	})
-	if err == redislock.ErrNotObtained {
+	if errors.Is(err, &redislock.ErrNotObtained{}) {
 		fmt.Println("Could not obtain lock!")
 	} else if err != nil {
 		log.Fatalln(err)

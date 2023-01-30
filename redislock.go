@@ -4,7 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/base64"
-	"errors"
+	"fmt"
 	"io"
 	"strconv"
 	"sync"
@@ -15,18 +15,37 @@ import (
 )
 
 var (
-	luaRefresh = redis.NewScript(`if redis.call("get", KEYS[1]) == ARGV[1] then return redis.call("pexpire", KEYS[1], ARGV[2]) else return 0 end`)
-	luaRelease = redis.NewScript(`if redis.call("get", KEYS[1]) == ARGV[1] then return redis.call("del", KEYS[1]) else return 0 end`)
-	luaPTTL    = redis.NewScript(`if redis.call("get", KEYS[1]) == ARGV[1] then return redis.call("pttl", KEYS[1]) else return -3 end`)
+	luaRefresh   = redis.NewScript(`if redis.call("get", KEYS[1]) == ARGV[1] then return redis.call("pexpire", KEYS[1], ARGV[2]) else return 0 end`)
+	luaRelease   = redis.NewScript(`if redis.call("get", KEYS[1]) == ARGV[1] then return redis.call("del", KEYS[1]) else return 0 end`)
+	luaPTTL      = redis.NewScript(`if redis.call("get", KEYS[1]) == ARGV[1] then return redis.call("pttl", KEYS[1]) else return -3 end`)
+	luaGetRecord = redis.NewScript(`return redis.call("get", KEYS[1])`)
 )
 
-var (
-	// ErrNotObtained is returned when a lock cannot be obtained.
-	ErrNotObtained = errors.New("redislock: not obtained")
+// ErrLockNotHeld is returned when trying to release an inactive lock.
+type ErrLockNotHeld struct {
+	err error
+}
 
-	// ErrLockNotHeld is returned when trying to release an inactive lock.
-	ErrLockNotHeld = errors.New("redislock: lock not held")
-)
+func (e *ErrLockNotHeld) Error() string {
+	msg := ""
+	if e.err != nil {
+		msg = e.err.Error()
+	}
+	return fmt.Sprintf("redislock - lock not held.%s", msg)
+}
+
+// ErrNotObtained is returned when a lock cannot be obtained.
+type ErrNotObtained struct {
+	err error
+}
+
+func (e *ErrNotObtained) Error() string {
+	msg := ""
+	if e.err != nil {
+		msg = e.err.Error()
+	}
+	return fmt.Sprintf("redislock - lock not obtained.%s", msg)
+}
 
 // RedisClient is a minimal client interface.
 type RedisClient interface {
@@ -76,7 +95,7 @@ func (c *Client) Obtain(ctx context.Context, key string, ttl time.Duration, opt 
 
 		backoff := retry.NextBackoff()
 		if backoff < 1 {
-			return nil, ErrNotObtained
+			return nil, &ErrNotObtained{err: fmt.Errorf("exceeded number of retries")}
 		}
 
 		if ticker == nil {
@@ -86,10 +105,25 @@ func (c *Client) Obtain(ctx context.Context, key string, ttl time.Duration, opt 
 
 		select {
 		case <-ctx.Done():
-			return nil, ErrNotObtained
+			return nil, &ErrNotObtained{err: fmt.Errorf("context exceeded")}
 		case <-ticker.C:
 		}
 	}
+}
+
+// Meta tries to get metadata for existing lock.
+// May return ErrLockNotHeld if not successful.
+func (c *Client) Meta(ctx context.Context, key string) (string, error) {
+	res, err := luaGetRecord.Run(ctx, c.client, []string{key}).Result()
+	if err != nil {
+		return "", &ErrLockNotHeld{err: err}
+	}
+
+	if len(res.(string)) < 23 {
+		return "", &ErrLockNotHeld{err: fmt.Errorf("got record with provided key, but it is not a lock")}
+	}
+
+	return res.(string)[22:], nil
 }
 
 func (c *Client) obtain(ctx context.Context, key, value string, ttl time.Duration) (bool, error) {
@@ -164,21 +198,19 @@ func (l *Lock) Refresh(ctx context.Context, ttl time.Duration, opt *Options) err
 	} else if status == int64(1) {
 		return nil
 	}
-	return ErrNotObtained
+	return &ErrNotObtained{}
 }
 
 // Release manually releases the lock.
 // May return ErrLockNotHeld.
 func (l *Lock) Release(ctx context.Context) error {
 	res, err := luaRelease.Run(ctx, l.client.client, []string{l.key}, l.value).Result()
-	if err == redis.Nil {
-		return ErrLockNotHeld
-	} else if err != nil {
-		return err
+	if err != nil {
+		return &ErrLockNotHeld{err}
 	}
 
 	if i, ok := res.(int64); !ok || i != 1 {
-		return ErrLockNotHeld
+		return &ErrLockNotHeld{fmt.Errorf("unexpected script response: %d", i)}
 	}
 	return nil
 }
@@ -272,11 +304,12 @@ func (r *exponentialBackoff) NextBackoff() time.Duration {
 		ms = 2 << cnt
 	}
 
-	if d := time.Duration(ms) * time.Millisecond; d < r.min {
+	switch d := time.Duration(ms) * time.Millisecond; {
+	case d < r.min:
 		return r.min
-	} else if r.max != 0 && d > r.max {
+	case r.max != 0 && d > r.max:
 		return r.max
-	} else {
+	default:
 		return d
 	}
 }
