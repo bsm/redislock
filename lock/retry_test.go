@@ -1,10 +1,8 @@
-package redislock_test
+package lock
 
 import (
 	"testing"
 	"time"
-
-	. "github.com/iSerganov/redislock/v1"
 )
 
 func TestNoRetry(t *testing.T) {

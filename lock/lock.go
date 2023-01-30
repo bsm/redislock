@@ -1,4 +1,4 @@
-package redislock
+package lock
 
 import (
 	"context"
