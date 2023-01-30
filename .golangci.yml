@@ -1,4 +1,4 @@
 linters-settings:
   errcheck:
     exclude-functions:
-      - (*github.com/bsm/redislock.Lock).Release
+      - (*github.com/iSerganov/redislock.Lock).Release
