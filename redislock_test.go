@@ -1,4 +1,4 @@
-package redislock_test
+package redislock
 
 import (
 	"context"
@@ -9,7 +9,6 @@ import (
 	"testing"
 	"time"
 
-	. "github.com/bsm/redislock"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -45,8 +44,9 @@ func TestClient(t *testing.T) {
 
 	// try to obtain again
 	_, err = client.Obtain(ctx, lockKey, time.Hour, nil)
-	if exp, got := ErrNotObtained, err; !errors.Is(got, exp) {
-		t.Fatalf("expected %v, got %v", exp, got)
+	exp := &ErrNotObtained{err: errors.New("exceeded number of retries")}
+	if err.Error() != exp.Error() {
+		t.Fatalf("expected %v, got %v", exp, err)
 	}
 
 	// manually unlock
@@ -90,6 +90,35 @@ func TestObtain_metadata(t *testing.T) {
 	}
 }
 
+func TestMeta(t *testing.T) {
+	ctx := context.Background()
+	rc := redis.NewClient(redisOpts)
+	defer teardown(t, rc)
+
+	meta := "Host: cool-host-11"
+	lock, err := Obtain(ctx, rc, lockKey, time.Hour, &Options{Metadata: meta})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lock.Release(ctx)
+
+	c := New(rc)
+	got, err := c.Meta(context.Background(), lockKey)
+
+	t.Logf("Got meta: %s", got)
+
+	if err != nil || got != meta {
+		t.Fatalf("expected %v, got %v", meta, got)
+	}
+
+	got, err = c.Meta(context.Background(), "not-existing-key")
+	exp := &ErrLockNotHeld{err: errors.New("redis: nil")}
+	if err.Error() != exp.Error() {
+		t.Fatalf("expected %s, but got: %s", exp, err)
+	}
+
+}
+
 func TestObtain_retry_success(t *testing.T) {
 	ctx := context.Background()
 	rc := redis.NewClient(redisOpts)
@@ -122,8 +151,9 @@ func TestObtain_retry_failure(t *testing.T) {
 	_, err := Obtain(ctx, rc, lockKey, time.Hour, &Options{
 		RetryStrategy: LimitRetry(LinearBackoff(5*time.Millisecond), 2),
 	})
-	if exp, got := ErrNotObtained, err; !errors.Is(got, exp) {
-		t.Fatalf("expected %v, got %v", exp, got)
+	exp := &ErrNotObtained{err: errors.New("exceeded number of retries")}
+	if err.Error() != exp.Error() {
+		t.Fatalf("expected %v, got %v", &ErrNotObtained{}, err)
 	}
 }
 
@@ -146,7 +176,7 @@ func TestObtain_concurrent(t *testing.T) {
 			time.Sleep(time.Duration(wait))
 
 			_, err := Obtain(ctx, rc, lockKey, time.Minute, nil)
-			if err == ErrNotObtained {
+			if _, ok := err.(*ErrNotObtained); ok {
 				return
 			} else if err != nil {
 				errs <- err
@@ -196,8 +226,9 @@ func TestLock_Refresh_expired(t *testing.T) {
 
 	// try releasing
 	time.Sleep(10 * time.Millisecond)
-	if exp, got := ErrNotObtained, lock.Refresh(ctx, time.Minute, nil); !errors.Is(got, exp) {
-		t.Fatalf("expected %v, got %v", exp, got)
+	res := lock.Refresh(ctx, time.Minute, nil)
+	if _, ok := res.(*ErrNotObtained); !ok {
+		t.Fatalf("expected %v, got %v", &ErrNotObtained{}, res)
 	}
 }
 
@@ -211,8 +242,9 @@ func TestLock_Release_expired(t *testing.T) {
 
 	// try releasing
 	time.Sleep(10 * time.Millisecond)
-	if exp, got := ErrLockNotHeld, lock.Release(ctx); !errors.Is(got, exp) {
-		t.Fatalf("expected %v, got %v", exp, got)
+	res := lock.Release(ctx)
+	if _, ok := res.(*ErrLockNotHeld); !ok {
+		t.Fatalf("expected %v, got %v", &ErrLockNotHeld{}, res)
 	}
 }
 
@@ -230,8 +262,9 @@ func TestLock_Release_not_own(t *testing.T) {
 	}
 
 	// try releasing
-	if exp, got := ErrLockNotHeld, lock.Release(ctx); !errors.Is(got, exp) {
-		t.Fatalf("expected %v, got %v", exp, got)
+	res := lock.Release(ctx)
+	if _, ok := res.(*ErrLockNotHeld); !ok {
+		t.Fatalf("expected %v, got %v", &ErrLockNotHeld{}, res)
 	}
 }
 
