@@ -82,6 +82,8 @@ func (c *Client) Obtain(ctx context.Context, key string, ttl time.Duration, opt 
 		if ticker == nil {
 			ticker = time.NewTicker(backoff)
 			defer ticker.Stop()
+		} else {
+			ticker.Reset(backoff)
 		}
 
 		select {
