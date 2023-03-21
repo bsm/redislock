@@ -30,7 +30,7 @@ func TestClient(t *testing.T) {
 	client := New(rc)
 
 	// obtain
-	lock, err := client.Obtain(ctx, lockKey, time.Hour, nil)
+	lock, err := client.Obtain(ctx, []string{lockKey}, time.Hour, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -44,7 +44,7 @@ func TestClient(t *testing.T) {
 	assertTTL(t, lock, time.Hour)
 
 	// try to obtain again
-	_, err = client.Obtain(ctx, lockKey, time.Hour, nil)
+	_, err = client.Obtain(ctx, []string{lockKey}, time.Hour, nil)
 	if exp, got := ErrNotObtained, err; !errors.Is(got, exp) {
 		t.Fatalf("expected %v, got %v", exp, got)
 	}
@@ -55,7 +55,7 @@ func TestClient(t *testing.T) {
 	}
 
 	// lock again
-	lock, err = client.Obtain(ctx, lockKey, time.Hour, nil)
+	lock, err = client.Obtain(ctx, []string{lockKey}, time.Hour, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -79,7 +79,7 @@ func TestObtain_metadata(t *testing.T) {
 	defer teardown(t, rc)
 
 	meta := "my-data"
-	lock, err := Obtain(ctx, rc, lockKey, time.Hour, &Options{Metadata: meta})
+	lock, err := Obtain(ctx, rc, []string{lockKey}, time.Hour, &Options{Metadata: meta})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -100,7 +100,7 @@ func TestObtain_retry_success(t *testing.T) {
 	defer lock1.Release(ctx)
 
 	// lock again with linar retry - 3x for 20ms
-	lock2, err := Obtain(ctx, rc, lockKey, time.Hour, &Options{
+	lock2, err := Obtain(ctx, rc, []string{lockKey}, time.Hour, &Options{
 		RetryStrategy: LimitRetry(LinearBackoff(20*time.Millisecond), 3),
 	})
 	if err != nil {
@@ -119,7 +119,7 @@ func TestObtain_retry_failure(t *testing.T) {
 	defer lock1.Release(ctx)
 
 	// lock again with linar retry - 2x for 5ms
-	_, err := Obtain(ctx, rc, lockKey, time.Hour, &Options{
+	_, err := Obtain(ctx, rc, []string{lockKey}, time.Hour, &Options{
 		RetryStrategy: LimitRetry(LinearBackoff(5*time.Millisecond), 2),
 	})
 	if exp, got := ErrNotObtained, err; !errors.Is(got, exp) {
@@ -145,7 +145,7 @@ func TestObtain_concurrent(t *testing.T) {
 			wait := rand.Int63n(int64(10 * time.Millisecond))
 			time.Sleep(time.Duration(wait))
 
-			_, err := Obtain(ctx, rc, lockKey, time.Minute, nil)
+			_, err := Obtain(ctx, rc, []string{lockKey}, time.Minute, nil)
 			if err == ErrNotObtained {
 				return
 			} else if err != nil {
@@ -238,7 +238,7 @@ func TestLock_Release_not_own(t *testing.T) {
 func quickObtain(t *testing.T, rc *redis.Client, ttl time.Duration) *Lock {
 	t.Helper()
 
-	lock, err := Obtain(context.Background(), rc, lockKey, ttl, nil)
+	lock, err := Obtain(context.Background(), rc, []string{lockKey}, ttl, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -24,7 +24,7 @@ func Example() {
 	ctx := context.Background()
 
 	// Try to obtain lock.
-	lock, err := locker.Obtain(ctx, "my-key", 100*time.Millisecond, nil)
+	lock, err := locker.Obtain(ctx, []string{"my-key"}, 100*time.Millisecond, nil)
 	if err == redislock.ErrNotObtained {
 		fmt.Println("Could not obtain lock!")
 	} else if err != nil {
@@ -74,7 +74,7 @@ func ExampleClient_Obtain_retry() {
 	backoff := redislock.LimitRetry(redislock.LinearBackoff(100*time.Millisecond), 3)
 
 	// Obtain lock with retry
-	lock, err := locker.Obtain(ctx, "my-key", time.Second, &redislock.Options{
+	lock, err := locker.Obtain(ctx, []string{"my-key"}, time.Second, &redislock.Options{
 		RetryStrategy: backoff,
 	})
 	if err == redislock.ErrNotObtained {
@@ -99,7 +99,7 @@ func ExampleClient_Obtain_customDeadline() {
 	defer cancel()
 
 	// Obtain lock with retry + custom deadline
-	lock, err := locker.Obtain(ctx, "my-key", time.Second, &redislock.Options{
+	lock, err := locker.Obtain(ctx, []string{"my-key"}, time.Second, &redislock.Options{
 		RetryStrategy: backoff,
 	})
 	if err == redislock.ErrNotObtained {
