@@ -11,7 +11,9 @@ For more information, please see examples.
 
 ```go
 import (
+  "context"
   "fmt"
+  "log"
   "time"
 
   "github.com/bsm/redislock"
