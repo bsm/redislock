@@ -90,6 +90,25 @@ func TestObtain_metadata(t *testing.T) {
 	}
 }
 
+func TestObtain_custom_token(t *testing.T) {
+	ctx := context.Background()
+	rc := redis.NewClient(redisOpts)
+	defer teardown(t, rc)
+
+	lock, err := Obtain(ctx, rc, lockKey, time.Hour, &Options{Token: "foo", Metadata: "bar"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lock.Release(ctx)
+
+	if exp, got := "foo", lock.Token(); exp != got {
+		t.Fatalf("expected %v, got %v", exp, got)
+	}
+	if exp, got := "bar", lock.Metadata(); exp != got {
+		t.Fatalf("expected %v, got %v", exp, got)
+	}
+}
+
 func TestObtain_retry_success(t *testing.T) {
 	ctx := context.Background()
 	rc := redis.NewClient(redisOpts)

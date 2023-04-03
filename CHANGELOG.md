@@ -1,3 +1,7 @@
+## v0.9.3
+
+- Feature: allow custom lock tokens [#66](https://github.com/bsm/redislock/pull/66)
+
 ## v0.9.2
 
 - Feature: better handling of nil lock.Release() [#68](https://github.com/bsm/redislock/pull/68)
