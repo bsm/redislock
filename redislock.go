@@ -71,7 +71,7 @@ func (c *Client) Obtain(ctx context.Context, key string, ttl time.Duration, opt 
 		if err != nil {
 			return nil, err
 		} else if ok {
-			return &Lock{client: c, key: key, value: value}, nil
+			return &Lock{Client: c, key: key, value: value}, nil
 		}
 
 		backoff := retry.NextBackoff()
@@ -116,9 +116,9 @@ func (c *Client) randomToken() (string, error) {
 
 // Lock represents an obtained, distributed lock.
 type Lock struct {
-	client *Client
-	key    string
-	value  string
+	*Client
+	key   string
+	value string
 }
 
 // Obtain is a short-cut for New(...).Obtain(...).
@@ -143,7 +143,7 @@ func (l *Lock) Metadata() string {
 
 // TTL returns the remaining time-to-live. Returns 0 if the lock has expired.
 func (l *Lock) TTL(ctx context.Context) (time.Duration, error) {
-	res, err := luaPTTL.Run(ctx, l.client.client, []string{l.key}, l.value).Result()
+	res, err := luaPTTL.Run(ctx, l.client, []string{l.key}, l.value).Result()
 	if err == redis.Nil {
 		return 0, nil
 	} else if err != nil {
@@ -160,7 +160,7 @@ func (l *Lock) TTL(ctx context.Context) (time.Duration, error) {
 // May return ErrNotObtained if refresh is unsuccessful.
 func (l *Lock) Refresh(ctx context.Context, ttl time.Duration, opt *Options) error {
 	ttlVal := strconv.FormatInt(int64(ttl/time.Millisecond), 10)
-	status, err := luaRefresh.Run(ctx, l.client.client, []string{l.key}, l.value, ttlVal).Result()
+	status, err := luaRefresh.Run(ctx, l.client, []string{l.key}, l.value, ttlVal).Result()
 	if err != nil {
 		return err
 	} else if status == int64(1) {
@@ -172,7 +172,11 @@ func (l *Lock) Refresh(ctx context.Context, ttl time.Duration, opt *Options) err
 // Release manually releases the lock.
 // May return ErrLockNotHeld.
 func (l *Lock) Release(ctx context.Context) error {
-	res, err := luaRelease.Run(ctx, l.client.client, []string{l.key}, l.value).Result()
+	if l == nil {
+		return ErrLockNotHeld
+	}
+
+	res, err := luaRelease.Run(ctx, l.client, []string{l.key}, l.value).Result()
 	if err == redis.Nil {
 		return ErrLockNotHeld
 	} else if err != nil {

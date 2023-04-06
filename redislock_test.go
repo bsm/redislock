@@ -235,6 +235,26 @@ func TestLock_Release_not_own(t *testing.T) {
 	}
 }
 
+func TestLock_Release_not_held(t *testing.T) {
+	ctx := context.Background()
+	rc := redis.NewClient(redisOpts)
+	defer teardown(t, rc)
+
+	lock1 := quickObtain(t, rc, time.Hour)
+	defer lock1.Release(ctx)
+
+	lock2, err := Obtain(context.Background(), rc, lockKey, time.Minute, nil)
+	if exp, got := ErrNotObtained, err; !errors.Is(got, exp) {
+		t.Fatalf("expected %v, got %v", exp, got)
+	}
+	if exp, got := (*Lock)(nil), lock2; exp != got {
+		t.Fatalf("expected %v, got %v", exp, got)
+	}
+	if exp, got := ErrLockNotHeld, lock2.Release(ctx); !errors.Is(got, exp) {
+		t.Fatalf("expected %v, got %v", exp, got)
+	}
+}
+
 func quickObtain(t *testing.T, rc *redis.Client, ttl time.Duration) *Lock {
 	t.Helper()
 
