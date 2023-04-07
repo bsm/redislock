@@ -1,3 +1,7 @@
+## v0.9.2
+
+- Feature: better handling of nil lock.Release() [#68](https://github.com/bsm/redislock/pull/68)
+
 ## v0.9.1
 
 - Fix: reset backoff ticker for exponential backoff [#58](https://github.com/bsm/redislock/pull/58)
