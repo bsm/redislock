@@ -49,10 +49,14 @@ func New(client RedisClient) *Client {
 // Obtain tries to obtain a new lock using a key with the given TTL.
 // May return ErrNotObtained if not successful.
 func (c *Client) Obtain(ctx context.Context, key string, ttl time.Duration, opt *Options) (*Lock, error) {
+	token := opt.getToken()
+
 	// Create a random token
-	token, err := c.randomToken()
-	if err != nil {
-		return nil, err
+	if token == "" {
+		var err error
+		if token, err = c.randomToken(); err != nil {
+			return nil, err
+		}
 	}
 
 	value := token + opt.getMetadata()
@@ -71,7 +75,7 @@ func (c *Client) Obtain(ctx context.Context, key string, ttl time.Duration, opt 
 		if err != nil {
 			return nil, err
 		} else if ok {
-			return &Lock{Client: c, key: key, value: value}, nil
+			return &Lock{Client: c, key: key, value: value, tokenLen: len(token)}, nil
 		}
 
 		backoff := retry.NextBackoff()
@@ -117,8 +121,9 @@ func (c *Client) randomToken() (string, error) {
 // Lock represents an obtained, distributed lock.
 type Lock struct {
 	*Client
-	key   string
-	value string
+	key      string
+	value    string
+	tokenLen int
 }
 
 // Obtain is a short-cut for New(...).Obtain(...).
@@ -133,12 +138,12 @@ func (l *Lock) Key() string {
 
 // Token returns the token value set by the lock.
 func (l *Lock) Token() string {
-	return l.value[:22]
+	return l.value[:l.tokenLen]
 }
 
 // Metadata returns the metadata of the lock.
 func (l *Lock) Metadata() string {
-	return l.value[22:]
+	return l.value[l.tokenLen:]
 }
 
 // TTL returns the remaining time-to-live. Returns 0 if the lock has expired.
@@ -197,13 +202,24 @@ type Options struct {
 	// Default: do not retry
 	RetryStrategy RetryStrategy
 
-	// Metadata string is appended to the lock token.
+	// Metadata string.
 	Metadata string
+
+	// Token is a unique value that is used to identify the lock. By default, a random tokens are generated. Use this
+	// option to provide a custom token instead.
+	Token string
 }
 
 func (o *Options) getMetadata() string {
 	if o != nil {
 		return o.Metadata
+	}
+	return ""
+}
+
+func (o *Options) getToken() string {
+	if o != nil {
+		return o.Token
 	}
 	return ""
 }
