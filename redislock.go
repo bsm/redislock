@@ -192,10 +192,16 @@ func (l *Lock) TTL(ctx context.Context) (time.Duration, error) {
 		return 0, ErrLockNotHeld
 	}
 	res, err := luaPTTL.Run(ctx, l.client, l.keys, l.value).Result()
+<<<<<<< HEAD
 	if err != nil {
 		if err.Error() == ErrLockNotHeld.Error() {
 			return 0, ErrLockNotHeld
 		}
+=======
+	if err == redis.Nil {
+		return 0, nil
+	} else if err != nil {
+>>>>>>> aaede11 (remove logs)
 		return 0, err
 	}
 	if num := res.(int64); num > 0 {
@@ -227,11 +233,19 @@ func (l *Lock) Release(ctx context.Context) error {
 	if l == nil {
 		return ErrLockNotHeld
 	}
+<<<<<<< HEAD
 	_, err := luaRelease.Run(ctx, l.client, l.keys, l.value).Result()
 	if err != nil {
 		if err.Error() == ErrLockNotHeld.Error() {
 			return ErrLockNotHeld
 		}
+=======
+
+	res, err := luaRelease.Run(ctx, l.client, l.keys, l.value).Result()
+	if err == redis.Nil {
+		return ErrLockNotHeld
+	} else if err != nil {
+>>>>>>> aaede11 (remove logs)
 		return err
 	}
 	return nil
