@@ -95,17 +95,38 @@ func TestObtain_custom_token(t *testing.T) {
 	rc := redis.NewClient(redisOpts)
 	defer teardown(t, rc)
 
-	lock, err := Obtain(ctx, rc, lockKey, time.Hour, &Options{Token: "foo", Metadata: "bar"})
+	// obtain lock
+	lock1, err := Obtain(ctx, rc, lockKey, time.Hour, &Options{Token: "foo", Metadata: "bar"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer lock.Release(ctx)
+	defer lock1.Release(ctx)
 
-	if exp, got := "foo", lock.Token(); exp != got {
+	if exp, got := "foo", lock1.Token(); exp != got {
+		t.Errorf("expected %v, got %v", exp, got)
+	}
+	if exp, got := "bar", lock1.Metadata(); exp != got {
+		t.Errorf("expected %v, got %v", exp, got)
+	}
+
+	// try to obtain again
+	_, err = Obtain(ctx, rc, lockKey, time.Hour, nil)
+	if exp, got := ErrNotObtained, err; !errors.Is(got, exp) {
 		t.Fatalf("expected %v, got %v", exp, got)
 	}
-	if exp, got := "bar", lock.Metadata(); exp != got {
-		t.Fatalf("expected %v, got %v", exp, got)
+
+	// allow to re-obtain lock if token is known
+	lock2, err := Obtain(ctx, rc, lockKey, time.Hour, &Options{Token: "foo", Metadata: "baz"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lock2.Release(ctx)
+
+	if exp, got := "foo", lock2.Token(); exp != got {
+		t.Errorf("expected %v, got %v", exp, got)
+	}
+	if exp, got := "baz", lock2.Metadata(); exp != got {
+		t.Errorf("expected %v, got %v", exp, got)
 	}
 }
 

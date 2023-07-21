@@ -1,3 +1,7 @@
+## v0.9.4
+
+- Fix: allow to re-obtain locks with tokens [#71](https://github.com/bsm/redislock/pull/71)
+
 ## v0.9.3
 
 - Feature: allow custom lock tokens [#66](https://github.com/bsm/redislock/pull/66)
