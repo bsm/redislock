@@ -18,6 +18,12 @@ var (
 	luaRefresh = redis.NewScript(`if redis.call("get", KEYS[1]) == ARGV[1] then return redis.call("pexpire", KEYS[1], ARGV[2]) else return 0 end`)
 	luaRelease = redis.NewScript(`if redis.call("get", KEYS[1]) == ARGV[1] then return redis.call("del", KEYS[1]) else return 0 end`)
 	luaPTTL    = redis.NewScript(`if redis.call("get", KEYS[1]) == ARGV[1] then return redis.call("pttl", KEYS[1]) else return -3 end`)
+	luaObtain  = redis.NewScript(`
+if redis.call("set", KEYS[1], ARGV[1], "NX", "PX", ARGV[3]) then return redis.status_reply("OK") end
+
+local offset = tonumber(ARGV[2])
+if redis.call("getrange", KEYS[1], 0, offset-1) == string.sub(ARGV[1], 1, offset) then return redis.call("set", KEYS[1], ARGV[1], "PX", ARGV[3]) end
+`)
 )
 
 var (
@@ -31,7 +37,6 @@ var (
 // RedisClient is a minimal client interface.
 type RedisClient interface {
 	redis.Scripter
-	SetNX(ctx context.Context, key string, value interface{}, expiration time.Duration) *redis.BoolCmd
 }
 
 // Client wraps a redis client.
@@ -60,6 +65,7 @@ func (c *Client) Obtain(ctx context.Context, key string, ttl time.Duration, opt 
 	}
 
 	value := token + opt.getMetadata()
+	ttlVal := strconv.FormatInt(int64(ttl/time.Millisecond), 10)
 	retry := opt.getRetryStrategy()
 
 	// make sure we don't retry forever
@@ -71,7 +77,7 @@ func (c *Client) Obtain(ctx context.Context, key string, ttl time.Duration, opt 
 
 	var ticker *time.Ticker
 	for {
-		ok, err := c.obtain(ctx, key, value, ttl)
+		ok, err := c.obtain(ctx, key, value, len(token), ttlVal)
 		if err != nil {
 			return nil, err
 		} else if ok {
@@ -98,8 +104,14 @@ func (c *Client) Obtain(ctx context.Context, key string, ttl time.Duration, opt 
 	}
 }
 
-func (c *Client) obtain(ctx context.Context, key, value string, ttl time.Duration) (bool, error) {
-	return c.client.SetNX(ctx, key, value, ttl).Result()
+func (c *Client) obtain(ctx context.Context, key, value string, tokenLen int, ttlVal string) (bool, error) {
+	_, err := luaObtain.Run(ctx, c.client, []string{key}, value, tokenLen, ttlVal).Result()
+	if err == redis.Nil {
+		return false, nil
+	} else if err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 func (c *Client) randomToken() (string, error) {
