@@ -338,8 +338,8 @@ func TestLock_ObtainMany(t *testing.T) {
 	// 3. Try to obtain lock 2 and 3
 	_, err = ObtainMany(ctx, rc, []string{"_ManyLock_2", "_ManyLock_3"}, time.Hour, nil)
 	// Expect it to fail since lock 2 and 3 are already locked.
-	if err == nil {
-		t.Fatal("expected error, got nothing.")
+	if errors.Is(err, ErrNotObtained) {
+		t.Fatal("expected ErrNotObtained, got nothing.")
 	}
 
 	// 4. Release lock 1 and 2
@@ -356,8 +356,8 @@ func TestLock_ObtainMany(t *testing.T) {
 	// 6. Try to obtain lock 2 and 3 (again)
 	_, err = ObtainMany(ctx, rc, []string{"_ManyLock_2", "_ManyLock_3"}, time.Hour, nil)
 	// Expect it to fail since lock 3 is still locked.
-	if err == nil {
-		t.Fatal("expected error, got nothing.")
+	if errors.Is(err, ErrNotObtained) {
+		t.Fatal("expected ErrNotObtained, got nothing.")
 	}
 
 	// 7. Release lock 3 and 4

@@ -193,7 +193,7 @@ func (l *Lock) TTL(ctx context.Context) (time.Duration, error) {
 	res, err := luaPTTL.Run(ctx, l.client, l.keys, l.value).Result()
 	if err != nil {
 		if err.Error() == ErrLockNotHeld.Error() {
-			return 0, ErrLockNotHeld
+			return 0, nil
 		}
 		return 0, err
 	}
