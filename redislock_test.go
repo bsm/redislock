@@ -317,6 +317,62 @@ func TestLock_Release_not_held(t *testing.T) {
 	}
 }
 
+func TestLock_ObtainMany(t *testing.T) {
+	lockKey := getLockKey()
+	ctx := context.Background()
+	rc := redis.NewClient(redisOpts)
+	defer teardown(t, rc, lockKey)
+
+	// 1. Obtain lock 1 and 2
+	lock12, err := ObtainMany(ctx, rc, []string{"_ManyLock_1", "_ManyLock_2"}, time.Hour, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// 2. Obtain lock 3 and 4
+	lock34, err := ObtainMany(ctx, rc, []string{"_ManyLock_3", "_ManyLock_4"}, time.Hour, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// 3. Try to obtain lock 2 and 3
+	_, err = ObtainMany(ctx, rc, []string{"_ManyLock_2", "_ManyLock_3"}, time.Hour, nil)
+	// Expect it to fail since lock 2 and 3 are already locked.
+	if err == nil {
+		t.Fatal("expected error, got nothing.")
+	}
+
+	// 4. Release lock 1 and 2
+	lock12.Release(ctx)
+
+	// 5. Obtain lock 1
+	lock1, err := ObtainMany(ctx, rc, []string{"_ManyLock_1"}, time.Hour, nil)
+	// Expected to succeed since lock 1 was released (along with lock 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lock1.Release(ctx)
+
+	// 6. Try to obtain lock 2 and 3 (again)
+	_, err = ObtainMany(ctx, rc, []string{"_ManyLock_2", "_ManyLock_3"}, time.Hour, nil)
+	// Expect it to fail since lock 3 is still locked.
+	if err == nil {
+		t.Fatal("expected error, got nothing.")
+	}
+
+	// 7. Release lock 3 and 4
+	lock34.Release(ctx)
+
+	// 8. Try to obtain lock 2 and 3 (again)
+	lock23, err := ObtainMany(ctx, rc, []string{"_ManyLock_2", "_ManyLock_3"}, time.Hour, nil)
+	// Expect it to succeed since lock 2 and 3 are available.
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	defer lock23.Release(ctx)
+}
+
 func getLockKey() string {
 	return fmt.Sprintf("__bsm_redislock_%s_%d__", getCallingFunctionName(1), time.Now().UnixNano())
 }
@@ -360,7 +416,6 @@ func teardown(t *testing.T, rc *redis.Client, lockKey string) {
 }
 
 func getCallingFunctionName(skipFrameCount int) string {
-
 	fpc, _, _, _ := runtime.Caller(1 + skipFrameCount)
 	funcName := "unknown"
 	fun := runtime.FuncForPC(fpc)
