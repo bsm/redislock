@@ -276,13 +276,12 @@ func TestLock_Release_not_own(t *testing.T) {
 	lock := quickObtain(t, rc, lockKey, time.Hour)
 	defer lock.Release(ctx)
 
-	realKey := "redislock_" + lockKey
 	// manually transfer ownership
-	if err := rc.Set(ctx, realKey, "ABCD", 0).Err(); err != nil {
+	if err := rc.Set(ctx, lockKey, "ABCD", 0).Err(); err != nil {
 		t.Fatal(err)
 	}
 
-	cmd := rc.Get(ctx, realKey)
+	cmd := rc.Get(ctx, lockKey)
 	v, err := cmd.Result()
 	if err != nil {
 		t.Fatal(err)
