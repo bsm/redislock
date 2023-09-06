@@ -318,35 +318,45 @@ func TestLock_Release_not_held(t *testing.T) {
 }
 
 func TestLock_ObtainMany(t *testing.T) {
-	lockKey := getLockKey()
+	lockKeys := []string{
+		getLockKey() + "_ManyLock_1",
+		getLockKey() + "_ManyLock_2",
+		getLockKey() + "_ManyLock_3",
+		getLockKey() + "_ManyLock_4",
+	}
 	ctx := context.Background()
 	rc := redis.NewClient(redisOpts)
-	defer teardown(t, rc, lockKey)
+	defer teardown(t, rc, lockKeys...)
+
+	lockKey1 := lockKeys[0]
+	lockKey2 := lockKeys[1]
+	lockKey3 := lockKeys[2]
+	lockKey4 := lockKeys[3]
 
 	// 1. Obtain lock 1 and 2
-	lock12, err := ObtainMany(ctx, rc, []string{"_ManyLock_1", "_ManyLock_2"}, time.Hour, nil)
+	lock12, err := ObtainMany(ctx, rc, []string{lockKey1, lockKey2}, time.Hour, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	// 2. Obtain lock 3 and 4
-	lock34, err := ObtainMany(ctx, rc, []string{"_ManyLock_3", "_ManyLock_4"}, time.Hour, nil)
+	lock34, err := ObtainMany(ctx, rc, []string{lockKey3, lockKey4}, time.Hour, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	// 3. Try to obtain lock 2 and 3
-	_, err = ObtainMany(ctx, rc, []string{"_ManyLock_2", "_ManyLock_3"}, time.Hour, nil)
+	_, err = ObtainMany(ctx, rc, []string{lockKey2, lockKey3}, time.Hour, nil)
 	// Expect it to fail since lock 2 and 3 are already locked.
-	if errors.Is(err, ErrNotObtained) {
-		t.Fatal("expected ErrNotObtained, got nothing.")
+	if !errors.Is(err, ErrNotObtained) {
+		t.Fatalf("expected ErrNotObtained, got %s.", err)
 	}
 
 	// 4. Release lock 1 and 2
 	lock12.Release(ctx)
 
 	// 5. Obtain lock 1
-	lock1, err := ObtainMany(ctx, rc, []string{"_ManyLock_1"}, time.Hour, nil)
+	lock1, err := ObtainMany(ctx, rc, []string{lockKey1}, time.Hour, nil)
 	// Expected to succeed since lock 1 was released (along with lock 2)
 	if err != nil {
 		t.Fatal(err)
@@ -354,17 +364,17 @@ func TestLock_ObtainMany(t *testing.T) {
 	defer lock1.Release(ctx)
 
 	// 6. Try to obtain lock 2 and 3 (again)
-	_, err = ObtainMany(ctx, rc, []string{"_ManyLock_2", "_ManyLock_3"}, time.Hour, nil)
+	_, err = ObtainMany(ctx, rc, []string{lockKey2, lockKey3}, time.Hour, nil)
 	// Expect it to fail since lock 3 is still locked.
-	if errors.Is(err, ErrNotObtained) {
-		t.Fatal("expected ErrNotObtained, got nothing.")
+	if !errors.Is(err, ErrNotObtained) {
+		t.Fatalf("expected ErrNotObtained, got %s.", err)
 	}
 
 	// 7. Release lock 3 and 4
 	lock34.Release(ctx)
 
 	// 8. Try to obtain lock 2 and 3 (again)
-	lock23, err := ObtainMany(ctx, rc, []string{"_ManyLock_2", "_ManyLock_3"}, time.Hour, nil)
+	lock23, err := ObtainMany(ctx, rc, []string{lockKey2, lockKey3}, time.Hour, nil)
 	// Expect it to succeed since lock 2 and 3 are available.
 	if err != nil {
 		t.Fatal(err)
@@ -404,11 +414,13 @@ func assertTTL(t *testing.T, lock *Lock, exp time.Duration) {
 	}
 }
 
-func teardown(t *testing.T, rc *redis.Client, lockKey string) {
+func teardown(t *testing.T, rc *redis.Client, lockKeys ...string) {
 	t.Helper()
 
-	if err := rc.Del(context.Background(), lockKey).Err(); err != nil {
-		t.Fatal(err)
+	for _, lockKey := range lockKeys {
+		if err := rc.Del(context.Background(), lockKey).Err(); err != nil {
+			t.Fatal(err)
+		}
 	}
 	if err := rc.Close(); err != nil {
 		t.Fatal(err)
