@@ -122,7 +122,7 @@ func (c *Client) ObtainMany(ctx context.Context, keys []string, ttl time.Duratio
 func (c *Client) obtain(ctx context.Context, keys []string, value string, tokenLen int, ttlVal string) (bool, error) {
 	_, err := luaObtain.Run(ctx, c.client, keys, value, tokenLen, ttlVal).Result()
 	if err != nil {
-		if err.Error() == ErrNotObtained.Error() {
+		if errors.Is(err, redis.Nil) {
 			return false, nil
 		}
 		return false, err
@@ -192,7 +192,7 @@ func (l *Lock) TTL(ctx context.Context) (time.Duration, error) {
 	}
 	res, err := luaPTTL.Run(ctx, l.client, l.keys, l.value).Result()
 	if err != nil {
-		if err.Error() == ErrLockNotHeld.Error() {
+		if errors.Is(err, redis.Nil) {
 			return 0, nil
 		}
 		return 0, err
@@ -212,7 +212,7 @@ func (l *Lock) Refresh(ctx context.Context, ttl time.Duration, opt *Options) err
 	ttlVal := strconv.FormatInt(int64(ttl/time.Millisecond), 10)
 	_, err := luaRefresh.Run(ctx, l.client, l.keys, l.value, ttlVal).Result()
 	if err != nil {
-		if err.Error() == ErrNotObtained.Error() {
+		if errors.Is(err, redis.Nil) {
 			return ErrNotObtained
 		}
 		return err
@@ -228,7 +228,7 @@ func (l *Lock) Release(ctx context.Context) error {
 	}
 	_, err := luaRelease.Run(ctx, l.client, l.keys, l.value).Result()
 	if err != nil {
-		if err.Error() == ErrLockNotHeld.Error() {
+		if errors.Is(err, redis.Nil) {
 			return ErrLockNotHeld
 		}
 		return err

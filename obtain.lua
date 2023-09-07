@@ -15,10 +15,8 @@ local function canOverrideKeys()
 	local offset = tonumber(ARGV[2])
 
 	for i, key in ipairs(KEYS) do
-		if i % 2 == 1 then
-			if redis.call("getrange", key, 0, offset-1) ~= string.sub(ARGV[1], 1, offset) then
-				return false
-			end
+		if redis.call("getrange", key, 0, offset-1) ~= string.sub(ARGV[1], 1, offset) then
+			return false
 		end
 	end
 	return true
@@ -33,7 +31,7 @@ end
 
 if redis.call("msetnx", unpack(setArgs)) ~= 1 then
 	if canOverrideKeys() == false then
-		return redis.error_reply("redislock: not obtained")
+		return false
 	end
 	redis.call("mset", unpack(setArgs))
 end

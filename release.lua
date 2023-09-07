@@ -5,7 +5,7 @@
 local values = redis.call("mget", unpack(KEYS))
 for i, _ in ipairs(KEYS) do
 	if values[i] ~= ARGV[1] then
-		return redis.error_reply("redislock: lock not held")
+		return false
 	end
 end
 
