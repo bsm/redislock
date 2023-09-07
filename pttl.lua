@@ -4,8 +4,8 @@
 -- Check all keys values matches provided input.
 local values = redis.call("mget", unpack(KEYS))
 for i, _ in ipairs(KEYS) do
-	if values[i] ~= false and values[i] ~= ARGV[1] then
-		return redis.error_reply("redislock: lock not held")
+	if values[i] ~= ARGV[1] then
+		return false
 	end
 end
 
