@@ -10,8 +10,6 @@ for i, _ in ipairs(KEYS) do
 end
 
 -- Delete keys.
-for _, key in ipairs(KEYS) do
-	redis.call("del", key)
-end
+redis.call("del", unpack(KEYS))
 
 return redis.status_reply("OK")
