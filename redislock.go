@@ -159,8 +159,8 @@ func Obtain(ctx context.Context, client RedisClient, key string, ttl time.Durati
 	return New(client).Obtain(ctx, key, ttl, opt)
 }
 
-// ObtainMany is a short-cut for New(...).ObtainMany(...).
-func ObtainMany(ctx context.Context, client RedisClient, keys []string, ttl time.Duration, opt *Options) (*Lock, error) {
+// ObtainMulti is a short-cut for New(...).ObtainMulti(...).
+func ObtainMulti(ctx context.Context, client RedisClient, keys []string, ttl time.Duration, opt *Options) (*Lock, error) {
 	return New(client).ObtainMulti(ctx, keys, ttl, opt)
 }
 
