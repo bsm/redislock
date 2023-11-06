@@ -62,14 +62,14 @@ func New(client RedisClient) *Client {
 // Obtain tries to obtain a new lock using a key with the given TTL.
 // May return ErrNotObtained if not successful.
 func (c *Client) Obtain(ctx context.Context, key string, ttl time.Duration, opt *Options) (*Lock, error) {
-	return c.ObtainMany(ctx, []string{key}, ttl, opt)
+	return c.ObtainMulti(ctx, []string{key}, ttl, opt)
 }
 
-// ObtainMany tries to obtain new locks using keys with the given TTL.
+// ObtainMulti tries to obtain new locks using keys with the given TTL.
 // If any of requested key are already locked, no additional keys are
 // locked and ErrNotObtained is returned.
 // May return ErrNotObtained if not successful.
-func (c *Client) ObtainMany(ctx context.Context, keys []string, ttl time.Duration, opt *Options) (*Lock, error) {
+func (c *Client) ObtainMulti(ctx context.Context, keys []string, ttl time.Duration, opt *Options) (*Lock, error) {
 	token := opt.getToken()
 	// Create a random token
 	if token == "" {
@@ -161,7 +161,7 @@ func Obtain(ctx context.Context, client RedisClient, key string, ttl time.Durati
 
 // ObtainMany is a short-cut for New(...).ObtainMany(...).
 func ObtainMany(ctx context.Context, client RedisClient, keys []string, ttl time.Duration, opt *Options) (*Lock, error) {
-	return New(client).ObtainMany(ctx, keys, ttl, opt)
+	return New(client).ObtainMulti(ctx, keys, ttl, opt)
 }
 
 // Key returns the redis key used by the lock.
@@ -186,6 +186,7 @@ func (l *Lock) Metadata() string {
 }
 
 // TTL returns the remaining time-to-live. Returns 0 if the lock has expired.
+// In case lock is holding multiple keys, TTL returns the min ttl among thoses keys.
 func (l *Lock) TTL(ctx context.Context) (time.Duration, error) {
 	if l == nil {
 		return 0, ErrLockNotHeld

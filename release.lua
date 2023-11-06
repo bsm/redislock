@@ -11,9 +11,7 @@ end
 
 -- Delete keys.
 for _, key in ipairs(KEYS) do
-	if redis.call("del", key) ~= 1 then
-		return redis.error_reply("redislock: failed to del " + key)
-	end
+	redis.call("del", key)
 end
 
 return redis.status_reply("OK")

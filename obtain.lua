@@ -14,7 +14,7 @@ end
 local function canOverrideKeys() 
 	local offset = tonumber(ARGV[2])
 
-	for i, key in ipairs(KEYS) do
+	for _, key in ipairs(KEYS) do
 		if redis.call("getrange", key, 0, offset-1) ~= string.sub(ARGV[1], 1, offset) then
 			return false
 		end
@@ -24,7 +24,7 @@ end
 
 -- Prepare mset arguments.
 local setArgs = {}
-for i, key in ipairs(KEYS) do
+for _, key in ipairs(KEYS) do
 	table.insert(setArgs, key)
 	table.insert(setArgs, ARGV[1])
 end
