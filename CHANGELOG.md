@@ -1,3 +1,7 @@
+## v0.10.0
+
+ - Feature: New ObtainMulti method to acquire multiple locks atomically [#70](https://github.com/bsm/redislock/pull/70)
+
 ## v0.9.4
 
 - Fix: allow to re-obtain locks with tokens [#71](https://github.com/bsm/redislock/pull/71)
