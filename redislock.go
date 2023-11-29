@@ -393,11 +393,15 @@ func recordStatus(s *Status, err error) {
 
 // --------------------------------------------------------------------
 
+// Watchdog allows to refresh atomatically.
 type Watchdog interface {
+	// Start starts the watchdog.
 	Start(ctx context.Context, lock *Lock, ttl time.Duration)
+	// Stop stops and waits the watchdog.
 	Stop()
 }
 
+// TickWatchdog refreshes the lock at regular intervals.
 type TickWatchdog struct {
 	ctx      context.Context
 	cancel   context.CancelFunc
@@ -405,11 +409,12 @@ type TickWatchdog struct {
 	ch       chan struct{}
 }
 
+// NewTickWatchdog creates a new watchdog that refreshes the lock at regular intervals.
 func NewTickWatchdog(interval time.Duration) *TickWatchdog {
 	return &TickWatchdog{interval: interval, ch: make(chan struct{})}
 }
 
-// Run starts the watchdog.
+// Start starts the watchdog.
 func (w *TickWatchdog) Start(ctx context.Context, lock *Lock, ttl time.Duration) {
 	defer close(w.ch)
 	atomic.AddInt64(&stats.Watchdog, 1)
@@ -438,6 +443,7 @@ func (w *TickWatchdog) Start(ctx context.Context, lock *Lock, ttl time.Duration)
 	}
 }
 
+// Stop stops and waits the watchdog.
 func (w *TickWatchdog) Stop() {
 	if w.cancel != nil {
 		w.cancel()
