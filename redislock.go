@@ -19,7 +19,7 @@ import (
 var luaReleaseScript string
 
 //go:embed refresh.lua
-var luaRefeshScript string
+var luaRefreshScript string
 
 //go:embed pttl.lua
 var luaPTTLScript string
@@ -28,7 +28,7 @@ var luaPTTLScript string
 var luaObtainScript string
 
 var (
-	luaRefresh = redis.NewScript(luaRefeshScript)
+	luaRefresh = redis.NewScript(luaRefreshScript)
 	luaRelease = redis.NewScript(luaReleaseScript)
 	luaPTTL    = redis.NewScript(luaPTTLScript)
 	luaObtain  = redis.NewScript(luaObtainScript)
@@ -186,7 +186,7 @@ func (l *Lock) Metadata() string {
 }
 
 // TTL returns the remaining time-to-live. Returns 0 if the lock has expired.
-// In case lock is holding multiple keys, TTL returns the min ttl among thoses keys.
+// In case lock is holding multiple keys, TTL returns the min ttl among those keys.
 func (l *Lock) TTL(ctx context.Context) (time.Duration, error) {
 	if l == nil {
 		return 0, ErrLockNotHeld
