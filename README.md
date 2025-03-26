@@ -1,7 +1,7 @@
 # redislock
 
-[![Test](https://github.com/bsm/redislock/actions/workflows/test.yml/badge.svg)](https://github.com/bsm/redislock/actions/workflows/test.yml)
-[![GoDoc](https://godoc.org/github.com/bsm/redislock?status.png)](http://godoc.org/github.com/bsm/redislock)
+[![Test](https://github.com/p1cn/redislock/actions/workflows/test.yml/badge.svg)](https://github.com/p1cn/redislock/actions/workflows/test.yml)
+[![GoDoc](https://godoc.org/github.com/p1cn/redislock?status.png)](http://godoc.org/github.com/p1cn/redislock)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 
 Simplified distributed locking implementation using [Redis](http://redis.io/topics/distlock).
@@ -16,7 +16,7 @@ import (
   "log"
   "time"
 
-  "github.com/bsm/redislock"
+  "github.com/p1cn/redislock"
   "github.com/redis/go-redis/v9"
 )
 
@@ -71,4 +71,4 @@ func main() {
 
 ## Documentation
 
-Full documentation is available on [GoDoc](http://godoc.org/github.com/bsm/redislock)
+Full documentation is available on [GoDoc](http://godoc.org/github.com/p1cn/redislock)

@@ -6,16 +6,18 @@ import (
 	"log"
 	"time"
 
-	"github.com/bsm/redislock"
-	"github.com/redis/go-redis/v9"
+	"github.com/p1cn/redislock"
+	redis "github.com/p1cn/redisx"
 )
 
 func Example() {
 	// Connect to redis.
-	client := redis.NewClient(&redis.Options{
-		Network: "tcp",
-		Addr:    "127.0.0.1:6379",
+	client, err := redis.NewClient(redis.Config{
+		Addrs: []string{"127.0.0.1:6379"},
 	})
+	if err != nil {
+		log.Fatalln(err)
+	}
 	defer client.Close()
 
 	// Create a new lock client.
@@ -65,7 +67,12 @@ func Example() {
 }
 
 func ExampleClient_Obtain_retry() {
-	client := redis.NewClient(&redis.Options{Network: "tcp", Addr: "127.0.0.1:6379"})
+	client, err := redis.NewClient(redis.Config{
+		Addrs: []string{"127.0.0.1:6379"},
+	})
+	if err != nil {
+		log.Fatalln(err)
+	}
 	defer client.Close()
 
 	locker := redislock.New(client)
@@ -90,7 +97,12 @@ func ExampleClient_Obtain_retry() {
 }
 
 func ExampleClient_Obtain_customDeadline() {
-	client := redis.NewClient(&redis.Options{Network: "tcp", Addr: "127.0.0.1:6379"})
+	client, err := redis.NewClient(redis.Config{
+		Addrs: []string{"127.0.0.1:6379"},
+	})
+	if err != nil {
+		log.Fatalln(err)
+	}
 	defer client.Close()
 
 	locker := redislock.New(client)

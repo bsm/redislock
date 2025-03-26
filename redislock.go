@@ -12,7 +12,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/redis/go-redis/v9"
+	redis "github.com/p1cn/redisx"
 )
 
 //go:embed release.lua
