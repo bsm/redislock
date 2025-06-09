@@ -37,6 +37,8 @@ func main() {
 	lock, err := locker.Obtain(ctx, "my-key", 100*time.Millisecond, nil)
 	if err == redislock.ErrNotObtained {
 		fmt.Println("Could not obtain lock!")
+		// It default 0 times backoff retrive, next step should be return or continue in a loop.
+		return
 	} else if err != nil {
 		log.Fatalln(err)
 	}
