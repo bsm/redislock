@@ -71,6 +71,29 @@ func main() {
 }
 ```
 
+## Watchdog
+
+If you want a long lock, you can use watchdog to refresh in background atomatically.
+Set an interval for watchdog shorter than TTL, it would refresh the lock before expiration,
+therefore your lock won't be released until you release it explicitly.
+
+```go
+lock, err := locker.Obtain(ctx, "my-key", 100*time.Millisecond, &redislock.Options{
+    Watchdog: redislock.NewTickWatchdog(50*time.Millisecond),
+})
+```
+
+## Stats
+
+Sometimes you need statistics for monitoring, telemetry, debugging, etc.
+
+```go
+stats := redislock.GetStats()
+```
+
+If you want prometheus metrics, see [redislock-prometheus](https://github.com/WqyJh/redislock-prometheus).
+
+
 ## Documentation
 
 Full documentation is available on [GoDoc](http://godoc.org/github.com/bsm/redislock)
