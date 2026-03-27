@@ -80,7 +80,7 @@ func (c *Client) ObtainMulti(ctx context.Context, keys []string, ttl time.Durati
 	}
 
 	value := token + opt.getMetadata()
-	ttlVal := strconv.FormatInt(int64(ttl/time.Millisecond), 10)
+	ttlVal := strconv.FormatInt(ttl.Milliseconds(), 10)
 	retry := opt.getRetryStrategy()
 
 	// make sure we don't retry forever
@@ -91,6 +91,11 @@ func (c *Client) ObtainMulti(ctx context.Context, keys []string, ttl time.Durati
 	}
 
 	var ticker *time.Ticker
+	defer func() {
+		if ticker != nil {
+			ticker.Stop()
+		}
+	}()
 	for {
 		ok, err := c.obtain(ctx, keys, value, len(token), ttlVal)
 		if err != nil {
@@ -106,7 +111,6 @@ func (c *Client) ObtainMulti(ctx context.Context, keys []string, ttl time.Durati
 
 		if ticker == nil {
 			ticker = time.NewTicker(backoff)
-			defer ticker.Stop()
 		} else {
 			ticker.Reset(backoff)
 		}
@@ -205,20 +209,44 @@ func (l *Lock) TTL(ctx context.Context) (time.Duration, error) {
 }
 
 // Refresh extends the lock with a new TTL.
-// May return ErrNotObtained if refresh is unsuccessful.
+// May return ErrNotObtained if refresh is unsuccessful
 func (l *Lock) Refresh(ctx context.Context, ttl time.Duration, opt *Options) error {
 	if l == nil {
 		return ErrNotObtained
 	}
-	ttlVal := strconv.FormatInt(int64(ttl/time.Millisecond), 10)
-	_, err := luaRefresh.Run(ctx, l.client, l.keys, l.value, ttlVal).Result()
-	if err != nil {
-		if errors.Is(err, redis.Nil) {
+	ttlVal := strconv.FormatInt(ttl.Milliseconds(), 10)
+	retry := opt.getRetryStrategy()
+	var ticker *time.Ticker
+	defer func() {
+		if ticker != nil {
+			ticker.Stop()
+		}
+	}()
+	for {
+		_, err := luaRefresh.Run(ctx, l.client, l.keys, l.value, ttlVal).Result()
+		if err == nil {
+			return nil
+		}
+		backoff := retry.NextBackoff()
+		// if the lock is not held, return ErrNotObtained without retrying
+		if errors.Is(err, redis.Nil) || backoff < 1 {
 			return ErrNotObtained
 		}
-		return err
+
+		if !isRetryableRedisError(err) {
+			return err
+		}
+		if ticker == nil {
+			ticker = time.NewTicker(backoff)
+		} else {
+			ticker.Reset(backoff)
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+		}
 	}
-	return nil
 }
 
 // Release manually releases the lock.
@@ -344,4 +372,8 @@ func (r *exponentialBackoff) NextBackoff() time.Duration {
 	} else {
 		return d
 	}
+}
+
+func isRetryableRedisError(err error) bool {
+	return !redis.IsPermissionError(err)
 }
