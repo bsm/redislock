@@ -174,6 +174,34 @@ func TestObtain_retry_failure(t *testing.T) {
 	}
 }
 
+// When Obtain gives up because the caller's context expired, the returned
+// error should still be matchable as ErrNotObtained (so callers that only
+// care about "did we get the lock?" can keep using errors.Is(err, ErrNotObtained))
+// while also wrapping the context error for diagnostics.
+func TestObtain_ctx_deadline_joins_not_obtained(t *testing.T) {
+	lockKey := getLockKey()
+	rc := redis.NewClient(redisOpts)
+	defer teardown(t, rc, lockKey)
+
+	// hold the lock for longer than the caller's deadline so retry never wins
+	bgCtx := context.Background()
+	lock1 := quickObtain(t, rc, lockKey, time.Second)
+	defer lock1.Release(bgCtx)
+
+	ctx, cancel := context.WithTimeout(bgCtx, 30*time.Millisecond)
+	defer cancel()
+
+	_, err := Obtain(ctx, rc, lockKey, time.Hour, &Options{
+		RetryStrategy: LinearBackoff(10 * time.Millisecond),
+	})
+	if !errors.Is(err, ErrNotObtained) {
+		t.Fatalf("expected error to wrap ErrNotObtained, got %v", err)
+	}
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("expected error to wrap context.DeadlineExceeded, got %v", err)
+	}
+}
+
 func TestObtain_concurrent(t *testing.T) {
 	lockKey := getLockKey()
 	ctx := context.Background()

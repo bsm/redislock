@@ -113,7 +113,10 @@ func (c *Client) ObtainMulti(ctx context.Context, keys []string, ttl time.Durati
 
 		select {
 		case <-ctx.Done():
-			return nil, ctx.Err()
+			// Surface both errors so callers can still match on
+			// ErrNotObtained (their reason for calling Obtain) while
+			// also keeping the context error for diagnostics.
+			return nil, errors.Join(ErrNotObtained, ctx.Err())
 		case <-ticker.C:
 		}
 	}
