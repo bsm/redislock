@@ -1,5 +1,7 @@
 ## Unreleased
 
+## v0.10.0
+
 - Feature: New ObtainMulti method to acquire multiple locks atomically [#70](https://github.com/bsm/redislock/pull/70)
 - Feature: `Lock.Refresh` now accepts an `Options.RetryStrategy` and retries transient redis errors.
 - Fix: a lost lock (refresh against a key whose value no longer matches) now returns `ErrNotObtained` immediately instead of being silently retried by the retry loop.
