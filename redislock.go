@@ -80,9 +80,42 @@ func (c *Client) ObtainMulti(ctx context.Context, keys []string, ttl time.Durati
 
 	value := token + opt.getMetadata()
 	ttlVal := strconv.FormatInt(int64(ttl/time.Millisecond), 10)
-	retry := opt.getRetryStrategy()
 
-	// make sure we don't retry forever
+	if err := withRetry(ctx, ttl, opt.getRetryStrategy(), func(ctx context.Context) (bool, error) {
+		ok, err := c.obtain(ctx, keys, value, len(token), ttlVal)
+		if err != nil {
+			// any non-nil error from obtain is terminal (transient redis
+			// errors are unlikely to clear within a lock TTL and retrying a
+			// broken server is futile).
+			return true, err
+		}
+		if ok {
+			return true, nil
+		}
+		// lock is held by someone else; retryable.
+		return false, nil
+	}); err != nil {
+		return nil, err
+	}
+	return &Lock{Client: c, keys: keys, value: value, tokenLen: len(token)}, nil
+}
+
+// withRetry runs attempt repeatedly until it signals it is done, the retry
+// strategy is exhausted, or ctx is done. The attempt function returns
+// (done, err):
+//   - done=true: stop and return err (success when err is nil, otherwise a
+//     terminal failure).
+//   - done=false, err=nil: retryable, no error to surface; on exhaustion
+//     withRetry returns ErrNotObtained.
+//   - done=false, err!=nil: retryable transient error; on exhaustion
+//     withRetry returns this last error, and on ctx cancellation it returns
+//     the last error joined with ctx.Err(). If no transient error was seen,
+//     ctx cancellation returns ErrNotObtained joined with ctx.Err().
+//
+// If ctx has no deadline one is derived from ttl as a final safety cap, so a
+// caller passing an unbounded retry strategy and a background context cannot
+// loop forever.
+func withRetry(ctx context.Context, ttl time.Duration, retry RetryStrategy, attempt func(context.Context) (bool, error)) error {
 	if _, ok := ctx.Deadline(); !ok {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithDeadline(ctx, time.Now().Add(ttl))
@@ -90,17 +123,22 @@ func (c *Client) ObtainMulti(ctx context.Context, keys []string, ttl time.Durati
 	}
 
 	var ticker *time.Ticker
+	var lastErr error
 	for {
-		ok, err := c.obtain(ctx, keys, value, len(token), ttlVal)
+		done, err := attempt(ctx)
+		if done {
+			return err
+		}
 		if err != nil {
-			return nil, err
-		} else if ok {
-			return &Lock{Client: c, keys: keys, value: value, tokenLen: len(token)}, nil
+			lastErr = err
 		}
 
 		backoff := retry.NextBackoff()
 		if backoff < 1 {
-			return nil, ErrNotObtained
+			if lastErr != nil {
+				return lastErr
+			}
+			return ErrNotObtained
 		}
 
 		if ticker == nil {
@@ -112,7 +150,11 @@ func (c *Client) ObtainMulti(ctx context.Context, keys []string, ttl time.Durati
 
 		select {
 		case <-ctx.Done():
-			return nil, ctx.Err()
+			err := lastErr
+			if err == nil {
+				err = ErrNotObtained
+			}
+			return errors.Join(err, ctx.Err())
 		case <-ticker.C:
 		}
 	}
@@ -210,14 +252,19 @@ func (l *Lock) Refresh(ctx context.Context, ttl time.Duration, opt *Options) err
 		return ErrNotObtained
 	}
 	ttlVal := strconv.FormatInt(int64(ttl/time.Millisecond), 10)
-	_, err := luaRefresh.Run(ctx, l.client, l.keys, l.value, ttlVal).Result()
-	if err != nil {
-		if errors.Is(err, redis.Nil) {
-			return ErrNotObtained
+
+	return withRetry(ctx, ttl, opt.getRetryStrategy(), func(ctx context.Context) (bool, error) {
+		_, err := luaRefresh.Run(ctx, l.client, l.keys, l.value, ttlVal).Result()
+		if err == nil {
+			return true, nil
 		}
-		return err
-	}
-	return nil
+		if errors.Is(err, redis.Nil) {
+			// the lock is no longer held by us; retrying cannot recover it.
+			return true, ErrNotObtained
+		}
+		// transient error; allow the retry strategy to try again.
+		return false, err
+	})
 }
 
 // Release manually releases the lock.
