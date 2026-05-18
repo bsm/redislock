@@ -89,6 +89,48 @@ func ExampleClient_Obtain_retry() {
 	fmt.Println("I have a lock!")
 }
 
+func ExampleLock_Refresh_watchdog() {
+	client := redis.NewClient(&redis.Options{Network: "tcp", Addr: "127.0.0.1:6379"})
+	defer client.Close()
+
+	locker := redislock.New(client)
+
+	ctx := context.Background()
+
+	// Obtain a lock with a 30s TTL.
+	const ttl = 30 * time.Second
+	lock, err := locker.Obtain(ctx, "my-key", ttl, nil)
+	if err != nil {
+		log.Fatalln(err)
+	}
+	defer lock.Release(context.Background())
+
+	// Start a watchdog that refreshes the lock every ttl/3. The work context
+	// is cancelled if a refresh fails so the protected work can abort.
+	workCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	go func() {
+		t := time.NewTicker(ttl / 3)
+		defer t.Stop()
+		for {
+			select {
+			case <-workCtx.Done():
+				return
+			case <-t.C:
+				if err := lock.Refresh(workCtx, ttl, nil); err != nil {
+					log.Printf("lock refresh failed: %v", err)
+					cancel()
+					return
+				}
+			}
+		}
+	}()
+
+	// ... do work using workCtx ...
+	fmt.Println("I have a lock!")
+}
+
 func ExampleClient_Obtain_customDeadline() {
 	client := redis.NewClient(&redis.Options{Network: "tcp", Addr: "127.0.0.1:6379"})
 	defer client.Close()
