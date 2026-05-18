@@ -1,6 +1,12 @@
-## v0.10.0
+## Unreleased
 
- - Feature: New ObtainMulti method to acquire multiple locks atomically [#70](https://github.com/bsm/redislock/pull/70)
+- Feature: New ObtainMulti method to acquire multiple locks atomically [#70](https://github.com/bsm/redislock/pull/70)
+- Feature: `Lock.Refresh` now accepts an `Options.RetryStrategy` and retries transient redis errors.
+- Fix: a lost lock (refresh against a key whose value no longer matches) now returns `ErrNotObtained` immediately instead of being silently retried by the retry loop.
+- Fix: `withRetry` surfaces the last transient error when retries are exhausted, instead of masking it as `ErrNotObtained`.
+- Fix: when retries are interrupted by a cancelled context, return `errors.Join(ErrNotObtained, ctx.Err())` (or the last transient error joined with `ctx.Err()`) so callers can match on both with `errors.Is`.
+- Docs: clarify `ExponentialBackoff` formula and the behaviour of its `min`/`max` arguments (first wait is 4ms; pass `min >= 16ms` for a sensible floor, non-zero `max` to cap growth).
+- Chore: bump `go-redis/v9` to v9.19.0 and raise minimum Go to 1.25 [#86](https://github.com/bsm/redislock/pull/86).
 
 ## v0.9.4
 
