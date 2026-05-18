@@ -1,4 +1,7 @@
-linters-settings:
-  errcheck:
-    exclude-functions:
-      - (*github.com/bsm/redislock.Lock).Release
+version: "2"
+linters:
+  settings:
+    errcheck:
+      exclude-functions:
+        - (*github.com/bsm/redislock.Lock).Release
+        - (*github.com/redis/go-redis/v9.baseClient).Close
