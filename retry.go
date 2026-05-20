@@ -39,10 +39,9 @@ func LimitRetry(s RetryStrategy, max int) RetryStrategy {
 }
 
 func (r *limitedRetry) NextBackoff() time.Duration {
-	if r.cnt.Load() >= r.max {
+	if r.cnt.Add(1) > r.max {
 		return 0
 	}
-	r.cnt.Add(1)
 	return r.s.NextBackoff()
 }
 

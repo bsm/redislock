@@ -1,6 +1,8 @@
 package redislock_test
 
 import (
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -58,5 +60,34 @@ func TestLimitRetry(t *testing.T) {
 		if got := retry.NextBackoff(); exp != got {
 			t.Fatalf("expected %d to be %v, got %v", i, exp, got)
 		}
+	}
+}
+
+func TestLimitRetry_concurrent(t *testing.T) {
+	const (
+		max     = 100
+		callers = 64
+	)
+
+	var allowed atomic.Int64
+	retry := LimitRetry(LinearBackoff(time.Millisecond), max)
+
+	var wg sync.WaitGroup
+	start := make(chan struct{})
+	for range callers {
+		wg.Go(func() {
+			<-start
+			for range max {
+				if retry.NextBackoff() > 0 {
+					allowed.Add(1)
+				}
+			}
+		})
+	}
+	close(start)
+	wg.Wait()
+
+	if got := allowed.Load(); got != max {
+		t.Fatalf("expected exactly %d allowed retries, got %d", max, got)
 	}
 }
