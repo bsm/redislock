@@ -210,111 +210,265 @@ func TestObtain_concurrent(t *testing.T) {
 }
 
 func TestLock_Refresh(t *testing.T) {
-	lock := quickObtain(t, time.Hour)
-	defer lock.Release(t.Context())
+	t.Run("success", func(t *testing.T) {
+		lock := quickObtain(t, time.Hour)
+		defer lock.Release(t.Context())
 
-	// check TTL
-	assertTTL(t, lock, time.Hour)
+		// check TTL
+		assertTTL(t, lock, time.Hour)
 
-	// update TTL
-	if err := lock.Refresh(t.Context(), time.Minute, nil); err != nil {
-		t.Fatal(err)
-	}
+		// update TTL
+		if err := lock.Refresh(t.Context(), time.Minute, nil); err != nil {
+			t.Fatal(err)
+		}
 
-	// check TTL again
-	assertTTL(t, lock, time.Minute)
-}
-
-func TestLock_Refresh_retry_success(t *testing.T) {
-	lock := quickObtain(t, time.Hour)
-	defer lock.Release(t.Context())
-
-	// refresh with linear retry - 3x for 20ms
-	if err := lock.Refresh(t.Context(), time.Minute, &Options{
-		RetryStrategy: LimitRetry(LinearBackoff(20*time.Millisecond), 3),
-	}); err != nil {
-		t.Fatal(err)
-	}
-	assertTTL(t, lock, time.Minute)
-}
-
-func TestLock_Refresh_retry_failure(t *testing.T) {
-	lock := quickObtain(t, 5*time.Millisecond)
-	defer lock.Release(t.Context())
-
-	// let the lock expire
-	time.Sleep(10 * time.Millisecond)
-
-	// refresh with linear retry - 2x for 100ms; should still return quickly
-	// because a lost lock is a terminal failure rather than a retryable one.
-	backoff := 100 * time.Millisecond
-	start := time.Now()
-	err := lock.Refresh(t.Context(), time.Hour, &Options{
-		RetryStrategy: LimitRetry(LinearBackoff(backoff), 2),
+		// check TTL again
+		assertTTL(t, lock, time.Minute)
 	})
-	if exp, got := ErrNotObtained, err; !errors.Is(got, exp) {
-		t.Fatalf("expected %v, got %v", exp, got)
-	}
-	if elapsed := time.Since(start); elapsed >= backoff {
-		t.Fatalf("expected Refresh on a lost lock to return without retrying, took %v", elapsed)
-	}
-}
 
-func TestLock_Refresh_retry_transient_error(t *testing.T) {
-	rc := redisConnect(t)
-	flaky := &flakyScripter{Client: rc.Client}
-	client := New(flaky)
+	t.Run("retry success", func(t *testing.T) {
+		lock := quickObtain(t, time.Hour)
+		defer lock.Release(t.Context())
 
-	lock, err := client.Obtain(t.Context(), rc.lockKey(), time.Hour, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer lock.Release(t.Context())
-
-	// fail the next 2 refresh attempts; the 3rd should succeed.
-	flaky.fails.Store(2)
-	if err := lock.Refresh(t.Context(), time.Minute, &Options{
-		RetryStrategy: LimitRetry(LinearBackoff(5*time.Millisecond), 5),
-	}); err != nil {
-		t.Fatalf("expected refresh to recover, got %v", err)
-	}
-	if remaining := flaky.fails.Load(); remaining != 0 {
-		t.Fatalf("expected all injected failures to be consumed, %d remaining", remaining)
-	}
-	assertTTL(t, lock, time.Minute)
-}
-
-func TestLock_Refresh_retry_transient_error_exhausted(t *testing.T) {
-	rc := redisConnect(t)
-	flaky := &flakyScripter{Client: rc.Client}
-	client := New(flaky)
-
-	lock, err := client.Obtain(t.Context(), rc.lockKey(), time.Hour, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer lock.Release(t.Context())
-
-	// keep failing past the retry limit; we should see the injected error
-	// rather than ErrNotObtained.
-	flaky.fails.Store(10)
-	err = lock.Refresh(t.Context(), time.Minute, &Options{
-		RetryStrategy: LimitRetry(LinearBackoff(5*time.Millisecond), 2),
+		// refresh with linear retry - 3x for 20ms
+		if err := lock.Refresh(t.Context(), time.Minute, &Options{
+			RetryStrategy: LimitRetry(LinearBackoff(20*time.Millisecond), 3),
+		}); err != nil {
+			t.Fatal(err)
+		}
+		assertTTL(t, lock, time.Minute)
 	})
-	if !errors.Is(err, errFlaky) {
-		t.Fatalf("expected %v, got %v", errFlaky, err)
-	}
-}
 
-func TestLock_Refresh_expired(t *testing.T) {
-	lock := quickObtain(t, 5*time.Millisecond)
-	defer lock.Release(t.Context())
+	t.Run("retry failure on lost lock returns immediately", func(t *testing.T) {
+		lock := quickObtain(t, 5*time.Millisecond)
+		defer lock.Release(t.Context())
 
-	// try releasing
-	time.Sleep(10 * time.Millisecond)
-	if exp, got := ErrNotObtained, lock.Refresh(t.Context(), time.Minute, nil); !errors.Is(got, exp) {
-		t.Fatalf("expected %v, got %v", exp, got)
-	}
+		// let the lock expire
+		time.Sleep(10 * time.Millisecond)
+
+		// refresh with linear retry - 2x for 100ms; should still return quickly
+		// because a lost lock is a terminal failure rather than a retryable one.
+		backoff := 100 * time.Millisecond
+		start := time.Now()
+		err := lock.Refresh(t.Context(), time.Hour, &Options{
+			RetryStrategy: LimitRetry(LinearBackoff(backoff), 2),
+		})
+		if exp, got := ErrNotObtained, err; !errors.Is(got, exp) {
+			t.Fatalf("expected %v, got %v", exp, got)
+		}
+		if elapsed := time.Since(start); elapsed >= backoff {
+			t.Fatalf("expected Refresh on a lost lock to return without retrying, took %v", elapsed)
+		}
+	})
+
+	t.Run("retry recovers from transient error", func(t *testing.T) {
+		rc := redisConnect(t)
+		flaky := &flakyScripter{Client: rc.Client}
+		client := New(flaky)
+
+		lock, err := client.Obtain(t.Context(), rc.lockKey(), time.Hour, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer lock.Release(t.Context())
+
+		// fail the next 2 refresh attempts; the 3rd should succeed.
+		flaky.fails.Store(2)
+		if err := lock.Refresh(t.Context(), time.Minute, &Options{
+			RetryStrategy: LimitRetry(LinearBackoff(5*time.Millisecond), 5),
+		}); err != nil {
+			t.Fatalf("expected refresh to recover, got %v", err)
+		}
+		if remaining := flaky.fails.Load(); remaining != 0 {
+			t.Fatalf("expected all injected failures to be consumed, %d remaining", remaining)
+		}
+		assertTTL(t, lock, time.Minute)
+	})
+
+	t.Run("retry exhausted returns last error", func(t *testing.T) {
+		rc := redisConnect(t)
+		flaky := &flakyScripter{Client: rc.Client}
+		client := New(flaky)
+
+		lock, err := client.Obtain(t.Context(), rc.lockKey(), time.Hour, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer lock.Release(t.Context())
+
+		// keep failing past the retry limit; we should see the injected error
+		// rather than ErrNotObtained.
+		flaky.fails.Store(10)
+		err = lock.Refresh(t.Context(), time.Minute, &Options{
+			RetryStrategy: LimitRetry(LinearBackoff(5*time.Millisecond), 2),
+		})
+		if !errors.Is(err, errFlaky) {
+			t.Fatalf("expected %v, got %v", errFlaky, err)
+		}
+	})
+
+	t.Run("expired", func(t *testing.T) {
+		lock := quickObtain(t, 5*time.Millisecond)
+		defer lock.Release(t.Context())
+
+		// try refreshing after expiry
+		time.Sleep(10 * time.Millisecond)
+		if exp, got := ErrNotObtained, lock.Refresh(t.Context(), time.Minute, nil); !errors.Is(got, exp) {
+			t.Fatalf("expected %v, got %v", exp, got)
+		}
+	})
+
+	t.Run("nil receiver", func(t *testing.T) {
+		var lock *Lock
+		if err := lock.Refresh(t.Context(), time.Minute, nil); !errors.Is(err, ErrNotObtained) {
+			t.Fatalf("expected %v, got %v", ErrNotObtained, err)
+		}
+	})
+
+	t.Run("value mismatch", func(t *testing.T) {
+		rc := redisConnect(t)
+		lockKey := rc.lockKey()
+
+		lock, err := Obtain(t.Context(), rc, lockKey, time.Hour, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer lock.Release(t.Context())
+
+		// another process steals the slot
+		if err := rc.Set(t.Context(), lockKey, "intruder", time.Hour).Err(); err != nil {
+			t.Fatal(err)
+		}
+		if err := lock.Refresh(t.Context(), time.Minute, nil); !errors.Is(err, ErrNotObtained) {
+			t.Fatalf("expected %v, got %v", ErrNotObtained, err)
+		}
+	})
+
+	t.Run("deleted key", func(t *testing.T) {
+		rc := redisConnect(t)
+		lockKey := rc.lockKey()
+
+		lock, err := Obtain(t.Context(), rc, lockKey, time.Hour, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer lock.Release(t.Context())
+
+		if err := rc.Del(t.Context(), lockKey).Err(); err != nil {
+			t.Fatal(err)
+		}
+		if err := lock.Refresh(t.Context(), time.Minute, nil); !errors.Is(err, ErrNotObtained) {
+			t.Fatalf("expected %v, got %v", ErrNotObtained, err)
+		}
+	})
+
+	t.Run("sequential refreshes", func(t *testing.T) {
+		lock := quickObtain(t, time.Hour)
+		defer lock.Release(t.Context())
+
+		if err := lock.Refresh(t.Context(), 30*time.Second, nil); err != nil {
+			t.Fatal(err)
+		}
+		assertTTL(t, lock, 30*time.Second)
+
+		if err := lock.Refresh(t.Context(), 2*time.Minute, nil); err != nil {
+			t.Fatal(err)
+		}
+		assertTTL(t, lock, 2*time.Minute)
+	})
+
+	t.Run("preserves token and metadata", func(t *testing.T) {
+		rc := redisConnect(t)
+		lockKey := rc.lockKey()
+
+		lock, err := Obtain(t.Context(), rc, lockKey, time.Hour, &Options{Token: "tok", Metadata: "meta"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer lock.Release(t.Context())
+
+		if err := lock.Refresh(t.Context(), time.Minute, nil); err != nil {
+			t.Fatal(err)
+		}
+
+		v, err := rc.Get(t.Context(), lockKey).Result()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if exp := "tok" + "meta"; v != exp {
+			t.Fatalf("expected %q, got %q", exp, v)
+		}
+		if exp, got := "tok", lock.Token(); exp != got {
+			t.Fatalf("expected token %q, got %q", exp, got)
+		}
+		if exp, got := "meta", lock.Metadata(); exp != got {
+			t.Fatalf("expected metadata %q, got %q", exp, got)
+		}
+	})
+
+	t.Run("multi-key missing", func(t *testing.T) {
+		rc := redisConnect(t)
+		keyA, keyB := rc.lockKey(), rc.lockKey()
+
+		lock, err := ObtainMulti(t.Context(), rc, []string{keyA, keyB}, time.Hour, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer lock.Release(t.Context())
+
+		if err := rc.Del(t.Context(), keyB).Err(); err != nil {
+			t.Fatal(err)
+		}
+		if err := lock.Refresh(t.Context(), time.Minute, nil); !errors.Is(err, ErrNotObtained) {
+			t.Fatalf("expected %v, got %v", ErrNotObtained, err)
+		}
+	})
+
+	t.Run("multi-key wrong value", func(t *testing.T) {
+		rc := redisConnect(t)
+		keyA, keyB := rc.lockKey(), rc.lockKey()
+
+		lock, err := ObtainMulti(t.Context(), rc, []string{keyA, keyB}, time.Hour, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer lock.Release(t.Context())
+
+		if err := rc.Set(t.Context(), keyA, "intruder", time.Hour).Err(); err != nil {
+			t.Fatal(err)
+		}
+		if err := lock.Refresh(t.Context(), time.Minute, nil); !errors.Is(err, ErrNotObtained) {
+			t.Fatalf("expected %v, got %v", ErrNotObtained, err)
+		}
+	})
+
+	t.Run("ctx cancelled during retry", func(t *testing.T) {
+		rc := redisConnect(t)
+		flaky := &flakyScripter{Client: rc.Client}
+		client := New(flaky)
+
+		lock, err := client.Obtain(t.Context(), rc.lockKey(), time.Hour, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer lock.Release(t.Context())
+
+		// keep failing so Refresh stays in the retry loop until ctx is cancelled.
+		flaky.fails.Store(1000)
+
+		ctx, cancel := context.WithCancel(t.Context())
+		time.AfterFunc(10*time.Millisecond, cancel)
+
+		err = lock.Refresh(ctx, time.Minute, &Options{
+			RetryStrategy: LinearBackoff(5 * time.Millisecond),
+		})
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("expected error to wrap context.Canceled, got %v", err)
+		}
+		if !errors.Is(err, errFlaky) {
+			t.Fatalf("expected error to wrap %v, got %v", errFlaky, err)
+		}
+	})
 }
 
 func TestLock_Release_expired(t *testing.T) {
