@@ -121,8 +121,8 @@ func TestObtain_fence(t *testing.T) {
 	// no token without the Fence option
 	plain := quickObtain(t, time.Hour)
 	defer plain.Release(t.Context())
-	if _, ok := plain.FenceToken(); ok {
-		t.Fatal("expected no fence token without Options.Fence")
+	if got := plain.FenceToken(); got != 0 {
+		t.Fatalf("expected no fence token without Options.Fence, got %v", got)
 	}
 	if err := plain.Release(t.Context()); err != nil {
 		t.Fatal(err)
@@ -133,10 +133,7 @@ func TestObtain_fence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	tok1, ok := lock1.FenceToken()
-	if !ok {
-		t.Fatal("expected a fence token with Options.Fence")
-	}
+	tok1 := lock1.FenceToken()
 	if exp, got := int64(1), tok1; exp != got {
 		t.Fatalf("expected first fence token %v, got %v", exp, got)
 	}
@@ -152,8 +149,7 @@ func TestObtain_fence(t *testing.T) {
 	}
 	defer lock2.Release(t.Context())
 
-	tok2, _ := lock2.FenceToken()
-	if tok2 <= tok1 {
+	if tok2 := lock2.FenceToken(); tok2 <= tok1 {
 		t.Fatalf("expected fence token > %v, got %v", tok1, tok2)
 	}
 }
@@ -170,7 +166,7 @@ func TestObtain_fence_reentrant(t *testing.T) {
 	}
 	defer lock1.Release(t.Context())
 
-	tok1, _ := lock1.FenceToken()
+	tok1 := lock1.FenceToken()
 
 	// re-obtain (override) must not advance the token
 	lock2, err := Obtain(t.Context(), rc, lockKey, time.Hour, &Options{Token: "foo", Fence: true})
@@ -179,8 +175,7 @@ func TestObtain_fence_reentrant(t *testing.T) {
 	}
 	defer lock2.Release(t.Context())
 
-	tok2, _ := lock2.FenceToken()
-	if exp, got := tok1, tok2; exp != got {
+	if exp, got := tok1, lock2.FenceToken(); exp != got {
 		t.Fatalf("re-entrant override must not mint a new token: expected %v, got %v", exp, got)
 	}
 }

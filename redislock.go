@@ -106,7 +106,7 @@ func (c *Client) ObtainMulti(ctx context.Context, keys []string, ttl time.Durati
 	}); err != nil {
 		return nil, err
 	}
-	return &Lock{Client: c, keys: keys, value: value, tokenLen: len(token), fenceToken: fenceToken, fenced: fence}, nil
+	return &Lock{Client: c, keys: keys, value: value, tokenLen: len(token), fenceToken: fenceToken}, nil
 }
 
 // withRetry runs attempt repeatedly until it signals it is done, the retry
@@ -209,7 +209,6 @@ type Lock struct {
 	value      string
 	tokenLen   int
 	fenceToken int64
-	fenced     bool
 }
 
 // Obtain is a short-cut for New(...).Obtain(...).
@@ -238,10 +237,10 @@ func (l *Lock) Token() string {
 	return l.value[:l.tokenLen]
 }
 
-// FenceToken returns the lock's fencing token, or false if it was obtained
-// without Options.Fence.
-func (l *Lock) FenceToken() (int64, bool) {
-	return l.fenceToken, l.fenced
+// FenceToken returns the lock's fencing token, or 0 if it was obtained without
+// Options.Fence. Tokens start at 1, so 0 always means unfenced.
+func (l *Lock) FenceToken() int64 {
+	return l.fenceToken
 }
 
 // Metadata returns the metadata of the lock.

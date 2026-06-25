@@ -102,8 +102,9 @@ func fence() {
 	}
 	defer lock.Release(ctx)
 
-	// Stamp writes to the protected resource with the token; reject older ones.
-	if token, ok := lock.FenceToken(); ok {
+	// FenceToken is 0 when the lock was obtained without Options.Fence. Stamp
+	// writes to the protected resource with the token; reject older ones.
+	if token := lock.FenceToken(); token != 0 {
 		fmt.Printf("fenced write with token %d\n", token)
 	}
 }
