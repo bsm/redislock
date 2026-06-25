@@ -232,7 +232,7 @@ func (l *Lock) TTL(ctx context.Context) (time.Duration, error) {
 	if l == nil {
 		return 0, ErrLockNotHeld
 	}
-	res, err := luaPTTL.Run(ctx, l.client, l.keys, l.value).Result()
+	res, err := luaPTTL.RunRO(ctx, l.client, l.keys, l.value).Result()
 	if err != nil {
 		if errors.Is(err, redis.Nil) {
 			return 0, nil
