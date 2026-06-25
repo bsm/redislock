@@ -113,6 +113,78 @@ func TestObtain_custom_token(t *testing.T) {
 	}
 }
 
+func TestObtain_fence(t *testing.T) {
+	rc := redisConnect(t)
+	lockKey := rc.lockKey()
+	rc.keys = append(rc.keys, lockKey+":fence")
+
+	// no token without the Fence option
+	plain := quickObtain(t, time.Hour)
+	defer plain.Release(t.Context())
+	if _, ok := plain.FenceToken(); ok {
+		t.Fatal("expected no fence token without Options.Fence")
+	}
+	if err := plain.Release(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+
+	// first fenced obtain
+	lock1, err := Obtain(t.Context(), rc, lockKey, time.Hour, &Options{Fence: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tok1, ok := lock1.FenceToken()
+	if !ok {
+		t.Fatal("expected a fence token with Options.Fence")
+	}
+	if exp, got := int64(1), tok1; exp != got {
+		t.Fatalf("expected first fence token %v, got %v", exp, got)
+	}
+
+	if err := lock1.Release(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+
+	// next obtain must mint a greater token
+	lock2, err := Obtain(t.Context(), rc, lockKey, time.Hour, &Options{Fence: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lock2.Release(t.Context())
+
+	tok2, _ := lock2.FenceToken()
+	if tok2 <= tok1 {
+		t.Fatalf("expected fence token > %v, got %v", tok1, tok2)
+	}
+}
+
+func TestObtain_fence_reentrant(t *testing.T) {
+	rc := redisConnect(t)
+	lockKey := rc.lockKey()
+	rc.keys = append(rc.keys, lockKey+":fence")
+
+	// obtain with a known token
+	lock1, err := Obtain(t.Context(), rc, lockKey, time.Hour, &Options{Token: "foo", Fence: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lock1.Release(t.Context())
+
+	tok1, _ := lock1.FenceToken()
+
+	// re-obtain (override) must not advance the token
+	lock2, err := Obtain(t.Context(), rc, lockKey, time.Hour, &Options{Token: "foo", Fence: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lock2.Release(t.Context())
+
+	tok2, _ := lock2.FenceToken()
+	if exp, got := tok1, tok2; exp != got {
+		t.Fatalf("re-entrant override must not mint a new token: expected %v, got %v", exp, got)
+	}
+}
+
 func TestObtain_retry_success(t *testing.T) {
 	rc := redisConnect(t)
 	lockKey := rc.lockKey()

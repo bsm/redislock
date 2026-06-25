@@ -1,6 +1,7 @@
--- obtain.lua: arguments => [value, tokenLen, ttl]
+-- obtain.lua: arguments => [value, tokenLen, ttl, fenceKey]
 -- Obtain.lua try to set provided keys's with value and ttl if they do not exists.
 -- Keys can be overriden if they already exists and the correct value+tokenLen is provided. 
+-- When fenceKey is set, returns a fencing token instead of "OK".
 
 local function pexpire(ttl)
 	-- Update keys ttls.
@@ -22,6 +23,20 @@ local function canOverrideKeys()
 	return true
 end
 
+local fenceKey = ARGV[4]
+
+-- reply returns the fencing token, advancing it only on a fresh acquisition,
+-- or "OK" when fencing is disabled.
+local function reply(fresh)
+	if fenceKey == nil or fenceKey == "" then
+		return redis.status_reply("OK")
+	end
+	if fresh then
+		return redis.call("incr", fenceKey)
+	end
+	return tonumber(redis.call("get", fenceKey) or "0")
+end
+
 -- Prepare mset arguments.
 local setArgs = {}
 for _, key in ipairs(KEYS) do
@@ -34,7 +49,9 @@ if redis.call("msetnx", unpack(setArgs)) ~= 1 then
 		return false
 	end
 	redis.call("mset", unpack(setArgs))
+	pexpire(ARGV[3])
+	return reply(false)
 end
 
 pexpire(ARGV[3])
-return redis.status_reply("OK")
+return reply(true)
