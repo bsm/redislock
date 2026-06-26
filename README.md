@@ -77,7 +77,7 @@ func main() {
 
 ### Fencing tokens
 
-Set `Options.Fence` to mint a **fencing token** with the lock: a strictly
+Set `Options.FenceKey` to mint a **fencing token** with the lock: a strictly
 increasing value, incremented atomically on each new acquisition and returned by
 `Lock.FenceToken`. Stamp every write to the protected resource with the token and
 have the resource reject any write carrying an older token. A lock holder that
@@ -96,14 +96,13 @@ func fence() {
 	ctx := context.Background()
 
 	// Obtain a lock with a fencing token.
-	lock, err := locker.Obtain(ctx, "my-key", time.Second, &redislock.Options{Fence: true})
+	lock, err := locker.Obtain(ctx, "my-key", time.Second, &redislock.Options{FenceKey: "my-key:fence"})
 	if err != nil {
 		log.Fatalln(err)
 	}
 	defer lock.Release(ctx)
 
-	// FenceToken is 0 when the lock was obtained without Options.Fence. Stamp
-	// writes to the protected resource with the token; reject older ones.
+	// FenceToken is 0 without a FenceKey. Stamp writes with the token; reject older ones.
 	if token := lock.FenceToken(); token != 0 {
 		fmt.Printf("fenced write with token %d\n", token)
 	}
@@ -116,8 +115,11 @@ A few notes:
   the check (`reject if incoming < highest applied`) must happen atomically at the
   resource, which is the only place the comparison and the write can be made one
   operation.
-- The token is stored at `<key>:fence` (the first key, for multi-key locks) and
-  persists across release so it keeps increasing; it is never reset by `Release`.
+- You supply `FenceKey`, so you control its placement. On Redis Cluster it must
+  hash to the same slot as the lock key(s) — share a `{hashtag}`, e.g. lock
+  `{job}:lock` with fence `{job}:fence` — or the script fails with `CROSSSLOT`.
+- The counter persists across release so it keeps increasing; it is never reset
+  by `Release`.
 - The token is only as monotonic as the underlying Redis. On a single instance it
   is strict; on a Sentinel/Cluster failover that loses the `INCR`, it can regress.
   For strict cross-failover monotonicity, source the token from a linearizable

@@ -98,14 +98,13 @@ func ExampleClient_Obtain_fence() {
 	ctx := context.Background()
 
 	// Obtain a lock with a fencing token.
-	lock, err := locker.Obtain(ctx, "my-key", time.Second, &redislock.Options{Fence: true})
+	lock, err := locker.Obtain(ctx, "my-key", time.Second, &redislock.Options{FenceKey: "my-key:fence"})
 	if err != nil {
 		log.Fatalln(err)
 	}
 	defer lock.Release(ctx)
 
-	// FenceToken is 0 when the lock was obtained without Options.Fence. Stamp
-	// writes to the protected resource with the token; reject older ones.
+	// FenceToken is 0 without a FenceKey. Stamp writes with the token; reject older ones.
 	if token := lock.FenceToken(); token != 0 {
 		fmt.Printf("fenced write with token %d\n", token)
 	}

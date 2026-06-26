@@ -81,11 +81,7 @@ func (c *Client) ObtainMulti(ctx context.Context, keys []string, ttl time.Durati
 	value := token + opt.getMetadata()
 	ttlVal := strconv.FormatInt(int64(ttl/time.Millisecond), 10)
 
-	fence := opt.getFence()
-	fenceKey := ""
-	if fence {
-		fenceKey = keys[0] + ":fence"
-	}
+	fenceKey := opt.getFenceKey()
 
 	var fenceToken int64
 
@@ -170,7 +166,19 @@ func withRetry(ctx context.Context, ttl time.Duration, retry RetryStrategy, atte
 }
 
 func (c *Client) obtain(ctx context.Context, keys []string, value string, tokenLen int, ttlVal, fenceKey string) (ok bool, fenceToken int64, err error) {
-	res, err := luaObtain.Run(ctx, c.client, keys, value, tokenLen, ttlVal, fenceKey).Result()
+	// The fence key, if any, goes in KEYS (so Cluster checks its slot) as the
+	// last entry; ARGV[4] flags its presence.
+	runKeys := keys
+	fence := 0
+
+	if fenceKey != "" {
+		runKeys = make([]string, 0, len(keys)+1)
+		runKeys = append(runKeys, keys...)
+		runKeys = append(runKeys, fenceKey)
+		fence = 1
+	}
+
+	res, err := luaObtain.Run(ctx, c.client, runKeys, value, tokenLen, ttlVal, fence).Result()
 	if err != nil {
 		if errors.Is(err, redis.Nil) {
 			return false, 0, nil
@@ -238,7 +246,7 @@ func (l *Lock) Token() string {
 }
 
 // FenceToken returns the lock's fencing token, or 0 if it was obtained without
-// Options.Fence. Tokens start at 1, so 0 always means unfenced.
+// Options.FenceKey. Tokens start at 1, so 0 always means unfenced.
 func (l *Lock) FenceToken() int64 {
 	return l.fenceToken
 }
@@ -320,10 +328,11 @@ type Options struct {
 	// option to provide a custom token instead.
 	Token string
 
-	// Fence enables a fencing token, minted on each new acquisition and
-	// returned by Lock.FenceToken. Stored at "<key>:fence".
-	// Default: disabled.
-	Fence bool
+	// FenceKey enables a fencing token, minted at this key on each new
+	// acquisition and returned by Lock.FenceToken. On Redis Cluster it must hash
+	// to the same slot as the lock key(s).
+	// Default: empty, no fencing.
+	FenceKey string
 }
 
 func (o *Options) getMetadata() string {
@@ -340,8 +349,11 @@ func (o *Options) getToken() string {
 	return ""
 }
 
-func (o *Options) getFence() bool {
-	return o != nil && o.Fence
+func (o *Options) getFenceKey() string {
+	if o != nil {
+		return o.FenceKey
+	}
+	return ""
 }
 
 func (o *Options) getRetryStrategy() RetryStrategy {

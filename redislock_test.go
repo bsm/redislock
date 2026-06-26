@@ -116,20 +116,21 @@ func TestObtain_custom_token(t *testing.T) {
 func TestObtain_fence(t *testing.T) {
 	rc := redisConnect(t)
 	lockKey := rc.lockKey()
-	rc.keys = append(rc.keys, lockKey+":fence")
+	fenceKey := lockKey + ":fence"
+	rc.keys = append(rc.keys, fenceKey)
 
-	// no token without the Fence option
+	// no token without a FenceKey
 	plain := quickObtain(t, time.Hour)
 	defer plain.Release(t.Context())
 	if got := plain.FenceToken(); got != 0 {
-		t.Fatalf("expected no fence token without Options.Fence, got %v", got)
+		t.Fatalf("expected no fence token without Options.FenceKey, got %v", got)
 	}
 	if err := plain.Release(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 
 	// first fenced obtain
-	lock1, err := Obtain(t.Context(), rc, lockKey, time.Hour, &Options{Fence: true})
+	lock1, err := Obtain(t.Context(), rc, lockKey, time.Hour, &Options{FenceKey: fenceKey})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -143,7 +144,7 @@ func TestObtain_fence(t *testing.T) {
 	}
 
 	// next obtain must mint a greater token
-	lock2, err := Obtain(t.Context(), rc, lockKey, time.Hour, &Options{Fence: true})
+	lock2, err := Obtain(t.Context(), rc, lockKey, time.Hour, &Options{FenceKey: fenceKey})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -157,10 +158,11 @@ func TestObtain_fence(t *testing.T) {
 func TestObtain_fence_reentrant(t *testing.T) {
 	rc := redisConnect(t)
 	lockKey := rc.lockKey()
-	rc.keys = append(rc.keys, lockKey+":fence")
+	fenceKey := lockKey + ":fence"
+	rc.keys = append(rc.keys, fenceKey)
 
 	// obtain with a known token
-	lock1, err := Obtain(t.Context(), rc, lockKey, time.Hour, &Options{Token: "foo", Fence: true})
+	lock1, err := Obtain(t.Context(), rc, lockKey, time.Hour, &Options{Token: "foo", FenceKey: fenceKey})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -169,7 +171,7 @@ func TestObtain_fence_reentrant(t *testing.T) {
 	tok1 := lock1.FenceToken()
 
 	// re-obtain (override) must not advance the token
-	lock2, err := Obtain(t.Context(), rc, lockKey, time.Hour, &Options{Token: "foo", Fence: true})
+	lock2, err := Obtain(t.Context(), rc, lockKey, time.Hour, &Options{Token: "foo", FenceKey: fenceKey})
 	if err != nil {
 		t.Fatal(err)
 	}
