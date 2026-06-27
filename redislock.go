@@ -81,8 +81,12 @@ func (c *Client) ObtainMulti(ctx context.Context, keys []string, ttl time.Durati
 	value := token + opt.getMetadata()
 	ttlVal := strconv.FormatInt(int64(ttl/time.Millisecond), 10)
 
+	fenceKey := opt.getFenceKey()
+
+	var fenceToken int64
+
 	if err := withRetry(ctx, ttl, opt.getRetryStrategy(), func(ctx context.Context) (bool, error) {
-		ok, err := c.obtain(ctx, keys, value, len(token), ttlVal)
+		ok, ft, err := c.obtain(ctx, keys, value, len(token), ttlVal, fenceKey)
 		if err != nil {
 			// any non-nil error from obtain is terminal (transient redis
 			// errors are unlikely to clear within a lock TTL and retrying a
@@ -90,6 +94,7 @@ func (c *Client) ObtainMulti(ctx context.Context, keys []string, ttl time.Durati
 			return true, err
 		}
 		if ok {
+			fenceToken = ft
 			return true, nil
 		}
 		// lock is held by someone else; retryable.
@@ -97,7 +102,7 @@ func (c *Client) ObtainMulti(ctx context.Context, keys []string, ttl time.Durati
 	}); err != nil {
 		return nil, err
 	}
-	return &Lock{Client: c, keys: keys, value: value, tokenLen: len(token)}, nil
+	return &Lock{Client: c, keys: keys, value: value, tokenLen: len(token), fenceToken: fenceToken}, nil
 }
 
 // withRetry runs attempt repeatedly until it signals it is done, the retry
@@ -160,15 +165,33 @@ func withRetry(ctx context.Context, ttl time.Duration, retry RetryStrategy, atte
 	}
 }
 
-func (c *Client) obtain(ctx context.Context, keys []string, value string, tokenLen int, ttlVal string) (bool, error) {
-	_, err := luaObtain.Run(ctx, c.client, keys, value, tokenLen, ttlVal).Result()
+func (c *Client) obtain(ctx context.Context, keys []string, value string, tokenLen int, ttlVal, fenceKey string) (ok bool, fenceToken int64, err error) {
+	// The fence key, if any, goes in KEYS (so Cluster checks its slot) as the
+	// last entry; ARGV[4] flags its presence.
+	runKeys := keys
+	fence := 0
+
+	if fenceKey != "" {
+		runKeys = make([]string, 0, len(keys)+1)
+		runKeys = append(runKeys, keys...)
+		runKeys = append(runKeys, fenceKey)
+		fence = 1
+	}
+
+	res, err := luaObtain.Run(ctx, c.client, runKeys, value, tokenLen, ttlVal, fence).Result()
 	if err != nil {
 		if errors.Is(err, redis.Nil) {
-			return false, nil
+			return false, 0, nil
 		}
-		return false, err
+		return false, 0, err
 	}
-	return true, nil
+
+	// With fencing the reply is the integer token; otherwise it is the "OK" status.
+	if token, isInt := res.(int64); isInt {
+		return true, token, nil
+	}
+
+	return true, 0, nil
 }
 
 func (c *Client) randomToken() (string, error) {
@@ -190,9 +213,10 @@ func (c *Client) randomToken() (string, error) {
 // Lock represents an obtained, distributed lock.
 type Lock struct {
 	*Client
-	keys     []string
-	value    string
-	tokenLen int
+	keys       []string
+	value      string
+	tokenLen   int
+	fenceToken int64
 }
 
 // Obtain is a short-cut for New(...).Obtain(...).
@@ -219,6 +243,12 @@ func (l *Lock) Keys() []string {
 // Token returns the token value set by the lock.
 func (l *Lock) Token() string {
 	return l.value[:l.tokenLen]
+}
+
+// FenceToken returns the lock's fencing token, or 0 if it was obtained without
+// Options.FenceKey. Tokens start at 1, so 0 always means unfenced.
+func (l *Lock) FenceToken() int64 {
+	return l.fenceToken
 }
 
 // Metadata returns the metadata of the lock.
@@ -297,6 +327,12 @@ type Options struct {
 	// Token is a unique value that is used to identify the lock. By default, a random tokens are generated. Use this
 	// option to provide a custom token instead.
 	Token string
+
+	// FenceKey enables a fencing token, minted at this key on each new
+	// acquisition and returned by Lock.FenceToken. On Redis Cluster it must hash
+	// to the same slot as the lock key(s).
+	// Default: empty, no fencing.
+	FenceKey string
 }
 
 func (o *Options) getMetadata() string {
@@ -309,6 +345,13 @@ func (o *Options) getMetadata() string {
 func (o *Options) getToken() string {
 	if o != nil {
 		return o.Token
+	}
+	return ""
+}
+
+func (o *Options) getFenceKey() string {
+	if o != nil {
+		return o.FenceKey
 	}
 	return ""
 }

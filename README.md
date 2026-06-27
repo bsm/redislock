@@ -75,6 +75,56 @@ func main() {
 }
 ```
 
+### Fencing tokens
+
+Set `Options.FenceKey` to mint a **fencing token** with the lock: a strictly
+increasing value, incremented atomically on each new acquisition and returned by
+`Lock.FenceToken`. Stamp every write to the protected resource with the token and
+have the resource reject any write carrying an older token. A lock holder that
+pauses (GC, scheduling) long enough to lose the lock without noticing is then
+fenced out — its writes carry a stale token and are refused. This is the
+mitigation described in Martin Kleppmann's
+[How to do distributed locking](https://martin.kleppmann.com/2016/02/08/how-to-do-distributed-locking.html).
+
+```go
+func fence() {
+	client := redis.NewClient(&redis.Options{Network: "tcp", Addr: "127.0.0.1:6379"})
+	defer client.Close()
+
+	locker := redislock.New(client)
+
+	ctx := context.Background()
+
+	// Obtain a lock with a fencing token.
+	lock, err := locker.Obtain(ctx, "my-key", time.Second, &redislock.Options{FenceKey: "my-key:fence"})
+	if err != nil {
+		log.Fatalln(err)
+	}
+	defer lock.Release(ctx)
+
+	// FenceToken is 0 without a FenceKey. Stamp writes with the token; reject older ones.
+	if token := lock.FenceToken(); token != 0 {
+		fmt.Printf("fenced write with token %d\n", token)
+	}
+}
+```
+
+A few notes:
+
+- Enforcement is the resource's job: `redislock` mints and returns the token, but
+  the check (`reject if incoming < highest applied`) must happen atomically at the
+  resource, which is the only place the comparison and the write can be made one
+  operation.
+- You supply `FenceKey`, so you control its placement. On Redis Cluster it must
+  hash to the same slot as the lock key(s) — share a `{hashtag}`, e.g. lock
+  `{job}:lock` with fence `{job}:fence` — or the script fails with `CROSSSLOT`.
+- The counter persists across release so it keeps increasing; it is never reset
+  by `Release`.
+- The token is only as monotonic as the underlying Redis. On a single instance it
+  is strict; on a Sentinel/Cluster failover that loses the `INCR`, it can regress.
+  For strict cross-failover monotonicity, source the token from a linearizable
+  store instead.
+
 ### External watchdog
 
 `redislock` deliberately does not bundle a built-in watchdog goroutine: refresh

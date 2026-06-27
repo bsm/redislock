@@ -89,6 +89,27 @@ func ExampleClient_Obtain_retry() {
 	fmt.Println("I have a lock!")
 }
 
+func ExampleClient_Obtain_fence() {
+	client := redis.NewClient(&redis.Options{Network: "tcp", Addr: "127.0.0.1:6379"})
+	defer client.Close()
+
+	locker := redislock.New(client)
+
+	ctx := context.Background()
+
+	// Obtain a lock with a fencing token.
+	lock, err := locker.Obtain(ctx, "my-key", time.Second, &redislock.Options{FenceKey: "my-key:fence"})
+	if err != nil {
+		log.Fatalln(err)
+	}
+	defer lock.Release(ctx)
+
+	// FenceToken is 0 without a FenceKey. Stamp writes with the token; reject older ones.
+	if token := lock.FenceToken(); token != 0 {
+		fmt.Printf("fenced write with token %d\n", token)
+	}
+}
+
 func ExampleLock_Refresh_watchdog() {
 	client := redis.NewClient(&redis.Options{Network: "tcp", Addr: "127.0.0.1:6379"})
 	defer client.Close()
