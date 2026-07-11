@@ -603,6 +603,84 @@ func TestLock_Release_not_held(t *testing.T) {
 	}
 }
 
+func TestClient_ReleaseByToken(t *testing.T) {
+	rc := redisConnect(t)
+	lockKey := rc.lockKey()
+	client := New(rc)
+
+	lock, err := client.Obtain(t.Context(), lockKey, time.Hour, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// release from just the key and token, without the *Lock
+	if err := client.ReleaseByToken(t.Context(), lockKey, lock.Token()); err != nil {
+		t.Fatal(err)
+	}
+
+	// the key is free again
+	lock2, err := client.Obtain(t.Context(), lockKey, time.Hour, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lock2.Release(t.Context())
+}
+
+func TestClient_ReleaseByToken_with_metadata(t *testing.T) {
+	rc := redisConnect(t)
+	lockKey := rc.lockKey()
+	client := New(rc)
+
+	// the stored value is token+metadata
+	lock, err := client.Obtain(t.Context(), lockKey, time.Hour, &Options{Token: "tok", Metadata: "meta"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// releasing by the token alone must clear it, without knowing the metadata
+	if err := client.ReleaseByToken(t.Context(), lockKey, lock.Token()); err != nil {
+		t.Fatal(err)
+	}
+
+	lock2, err := client.Obtain(t.Context(), lockKey, time.Hour, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lock2.Release(t.Context())
+}
+
+func TestClient_ReleaseByToken_wrong_token(t *testing.T) {
+	rc := redisConnect(t)
+	lockKey := rc.lockKey()
+	client := New(rc)
+
+	lock, err := client.Obtain(t.Context(), lockKey, time.Hour, &Options{Token: "mine"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lock.Release(t.Context())
+
+	// a wrong token must not release someone else's lock
+	if exp, got := ErrLockNotHeld, client.ReleaseByToken(t.Context(), lockKey, "theirs"); !errors.Is(got, exp) {
+		t.Fatalf("expected %v, got %v", exp, got)
+	}
+
+	// the lock is still held, so the real owner can still release it
+	if err := lock.Release(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestClient_ReleaseByToken_not_held(t *testing.T) {
+	rc := redisConnect(t)
+	client := New(rc)
+
+	err := client.ReleaseByToken(t.Context(), rc.lockKey(), "nonexistent")
+	if exp, got := ErrLockNotHeld, err; !errors.Is(got, exp) {
+		t.Fatalf("expected %v, got %v", exp, got)
+	}
+}
+
 func TestLock_ObtainMulti(t *testing.T) {
 	rc := redisConnect(t)
 	lockKey1 := rc.lockKey("_MultiLock_1")

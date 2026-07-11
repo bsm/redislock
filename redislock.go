@@ -26,11 +26,15 @@ var luaPTTLScript string
 //go:embed obtain.lua
 var luaObtainScript string
 
+//go:embed release_token.lua
+var luaReleaseTokenScript string
+
 var (
-	luaRefresh = redis.NewScript(luaRefreshScript)
-	luaRelease = redis.NewScript(luaReleaseScript)
-	luaPTTL    = redis.NewScript(luaPTTLScript)
-	luaObtain  = redis.NewScript(luaObtainScript)
+	luaRefresh      = redis.NewScript(luaRefreshScript)
+	luaRelease      = redis.NewScript(luaReleaseScript)
+	luaPTTL         = redis.NewScript(luaPTTLScript)
+	luaObtain       = redis.NewScript(luaObtainScript)
+	luaReleaseToken = redis.NewScript(luaReleaseTokenScript)
 )
 
 var (
@@ -103,6 +107,29 @@ func (c *Client) ObtainMulti(ctx context.Context, keys []string, ttl time.Durati
 		return nil, err
 	}
 	return &Lock{Client: c, keys: keys, value: value, tokenLen: len(token), fenceToken: fenceToken}, nil
+}
+
+// ReleaseByToken releases the lock on key, identified by its token, without the
+// *Lock that Obtain returned. Use it when acquire and release run in different
+// processes and only the token was carried across. It matches on the token
+// alone, so Metadata need not have been set, and like Lock.Release it leaves
+// any FenceKey counter untouched.
+// May return ErrLockNotHeld.
+func (c *Client) ReleaseByToken(ctx context.Context, key, token string) error {
+	return c.ReleaseMultiByToken(ctx, []string{key}, token)
+}
+
+// ReleaseMultiByToken is the multi-key form of ReleaseByToken.
+// May return ErrLockNotHeld.
+func (c *Client) ReleaseMultiByToken(ctx context.Context, keys []string, token string) error {
+	_, err := luaReleaseToken.Run(ctx, c.client, keys, token).Result()
+	if err != nil {
+		if errors.Is(err, redis.Nil) {
+			return ErrLockNotHeld
+		}
+		return err
+	}
+	return nil
 }
 
 // withRetry runs attempt repeatedly until it signals it is done, the retry
@@ -227,6 +254,16 @@ func Obtain(ctx context.Context, client RedisClient, key string, ttl time.Durati
 // ObtainMulti is a short-cut for New(...).ObtainMulti(...).
 func ObtainMulti(ctx context.Context, client RedisClient, keys []string, ttl time.Duration, opt *Options) (*Lock, error) {
 	return New(client).ObtainMulti(ctx, keys, ttl, opt)
+}
+
+// ReleaseByToken is a short-cut for New(...).ReleaseByToken(...).
+func ReleaseByToken(ctx context.Context, client RedisClient, key, token string) error {
+	return New(client).ReleaseByToken(ctx, key, token)
+}
+
+// ReleaseMultiByToken is a short-cut for New(...).ReleaseMultiByToken(...).
+func ReleaseMultiByToken(ctx context.Context, client RedisClient, keys []string, token string) error {
+	return New(client).ReleaseMultiByToken(ctx, keys, token)
 }
 
 // Key returns the redis key used by the lock.
