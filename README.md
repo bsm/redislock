@@ -125,6 +125,40 @@ A few notes:
   For strict cross-failover monotonicity, source the token from a linearizable
   store instead.
 
+### Release by token
+
+`Lock.Release` needs the `*Lock` that `Obtain` returned, so release has to run in
+the process that acquired the lock. To release from elsewhere — a worker that was
+only handed the token — call `Client.ReleaseByToken` (or `ReleaseMultiByToken`)
+with the key and the token from `Options.Token`:
+
+```go
+func releaseByToken() {
+	client := redis.NewClient(&redis.Options{Network: "tcp", Addr: "127.0.0.1:6379"})
+	defer client.Close()
+
+	locker := redislock.New(client)
+
+	ctx := context.Background()
+
+	// Obtain with a known token in one process, then hand the token off.
+	lock, err := locker.Obtain(ctx, "my-key", time.Minute, &redislock.Options{Token: "abc123"})
+	if err != nil {
+		log.Fatalln(err)
+	}
+	fmt.Println("holding", lock.Key())
+
+	// A different process, with only the key and token, can release it without
+	// the *Lock that Obtain returned.
+	if err := locker.ReleaseByToken(ctx, "my-key", "abc123"); err != nil {
+		log.Fatalln(err)
+	}
+}
+```
+
+It matches on the token prefix alone, so `Metadata` set at acquisition is not
+required, and it leaves any `FenceKey` counter untouched.
+
 ### External watchdog
 
 `redislock` deliberately does not bundle a built-in watchdog goroutine: refresh

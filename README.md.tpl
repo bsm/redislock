@@ -58,6 +58,20 @@ A few notes:
   For strict cross-failover monotonicity, source the token from a linearizable
   store instead.
 
+### Release by token
+
+`Lock.Release` needs the `*Lock` that `Obtain` returned, so release has to run in
+the process that acquired the lock. To release from elsewhere — a worker that was
+only handed the token — call `Client.ReleaseByToken` (or `ReleaseMultiByToken`)
+with the key and the token from `Options.Token`:
+
+```go
+func releaseByToken() {{ "ExampleClient_ReleaseByToken" | code }}
+```
+
+It matches on the token prefix alone, so `Metadata` set at acquisition is not
+required, and it leaves any `FenceKey` counter untouched.
+
 ### External watchdog
 
 `redislock` deliberately does not bundle a built-in watchdog goroutine: refresh

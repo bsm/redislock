@@ -176,3 +176,25 @@ func ExampleClient_Obtain_customDeadline() {
 
 	fmt.Println("I have a lock!")
 }
+
+func ExampleClient_ReleaseByToken() {
+	client := redis.NewClient(&redis.Options{Network: "tcp", Addr: "127.0.0.1:6379"})
+	defer client.Close()
+
+	locker := redislock.New(client)
+
+	ctx := context.Background()
+
+	// Obtain with a known token in one process, then hand the token off.
+	lock, err := locker.Obtain(ctx, "my-key", time.Minute, &redislock.Options{Token: "abc123"})
+	if err != nil {
+		log.Fatalln(err)
+	}
+	fmt.Println("holding", lock.Key())
+
+	// A different process, with only the key and token, can release it without
+	// the *Lock that Obtain returned.
+	if err := locker.ReleaseByToken(ctx, "my-key", "abc123"); err != nil {
+		log.Fatalln(err)
+	}
+}
